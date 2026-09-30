@@ -3,11 +3,12 @@
 </script>
 
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import { failureMessage } from '$lib/actions';
-	import { dueLabel } from '$lib/dates';
-	import { parseQuickAdd, type QuickAddList } from '$lib/quick-add';
+	import { dueLabel, formatDay } from '$lib/dates';
+	import { parseQuickAdd, type DateOrder, type QuickAddList } from '$lib/quick-add';
 	import { toasts } from '$lib/toasts.svelte';
 
 	type Props = {
@@ -28,14 +29,49 @@
 	let value = $state('');
 	/** Off once the user dismisses a chip: the text is then kept exactly as typed. */
 	let parsing = $state(true);
+	/** A date chosen in the chip's picker; it replaces the parsed date. */
+	let picked = $state<string | null>(null);
+	/**
+	 * Slash dates are day-first unless the browser's locale is US English. Only set
+	 * once hydrated, so without JS no field is sent and the server uses Accept-Language.
+	 */
+	let dateOrder = $state<DateOrder>();
+	let picker = $state<HTMLInputElement>();
+
+	onMount(() => {
+		dateOrder = navigator.language.toLowerCase() === 'en-us' ? 'mdy' : 'dmy';
+	});
 
 	// Preview only: the server re-parses the raw text itself.
-	const parsed = $derived(parsing && value.trim() ? parseQuickAdd(value, { today, lists }) : null);
+	const preview = (text: string) => parseQuickAdd(text, { today, lists, dateOrder });
+	const parsed = $derived(parsing && value.trim() ? preview(value) : null);
 	const showChips = $derived(!!(parsed?.dueDate || parsed?.listName));
+	/** What the date chip shows and what gets saved: the picked date, else the parsed one. */
+	const due = $derived(parsed?.dueDate ? (picked ?? parsed.dueDate) : null);
+
+	/** "Tomorrow, Thu 1 Oct", or just "Tue 6 Oct" when the relative label is the date. */
+	function spoken(date: string) {
+		const relative = dueLabel(date, today).text;
+		const absolute = formatDay(date, today);
+		return relative === absolute ? absolute : `${relative}, ${absolute}`;
+	}
 
 	function literal() {
 		parsing = false;
+		picked = null;
 		document.getElementById('quick-add')?.focus();
+	}
+
+	function openPicker() {
+		if (!picker) return;
+		picker.value = due ?? '';
+		try {
+			picker.showPicker();
+		} catch {
+			// Older browsers: focusing the (invisible) input still opens its picker on click.
+			picker.focus();
+			picker.click();
+		}
 	}
 
 	function onkeydown(event: KeyboardEvent) {
@@ -43,7 +79,7 @@
 			// Keep the text literal; don't let Escape also close a panel or drawer.
 			event.preventDefault();
 			event.stopPropagation();
-			parsing = false;
+			literal();
 		}
 	}
 </script>
@@ -54,14 +90,15 @@
 	use:enhance={({ formData, cancel }) => {
 		const raw = String(formData.get('title') ?? '').trim();
 		if (!raw) return cancel();
-		const preview = parsing ? parseQuickAdd(raw, { today, lists }) : null;
+		const result = parsing ? preview(raw) : null;
 		onadd?.({
-			title: preview?.title ?? raw,
-			listId: preview?.listId ?? listId,
-			dueDate: preview?.dueDate ?? (view === 'today' ? today : null)
+			title: result?.title ?? raw,
+			listId: result?.listId ?? listId,
+			dueDate: (result?.dueDate && picked) || result?.dueDate || (view === 'today' ? today : null)
 		});
 		value = '';
 		parsing = true;
+		picked = null;
 		return async ({ result, update }) => {
 			await update({ reset: false });
 			if (result.type === 'success' && result.data?.added) onadded?.(result.data.added as Added);
@@ -72,6 +109,8 @@
 	<input type="hidden" name="listId" value={listId ?? 'inbox'} />
 	<input type="hidden" name="view" value={view} />
 	<input type="hidden" name="parse" value={String(parsing)} />
+	{#if dateOrder}<input type="hidden" name="dateOrder" value={dateOrder} />{/if}
+	{#if parsing && due && picked}<input type="hidden" name="dueDate" value={picked} />{/if}
 	<div class="relative">
 		<label for="quick-add" class="sr-only">New task</label>
 		<input
@@ -102,16 +141,33 @@
 		aria-live="polite"
 	>
 		{#if parsed && showChips}
-			{#if parsed.dueDate}
+			{#if due}
 				<span
-					class="mt-2 inline-flex items-center gap-1 rounded-full bg-accent-soft py-0.5 pr-1 pl-2.5"
+					class="relative mt-2 inline-flex items-center rounded-full bg-accent-soft py-0.5 pr-1 pl-1"
 				>
-					<span aria-hidden="true">📅</span>
-					<span>{dueLabel(parsed.dueDate, today).text}</span>
+					<button
+						type="button"
+						class="inline-flex items-center gap-1 rounded-full px-1.5 hover:bg-raised"
+						aria-label="Due date: {spoken(due)}. Change date"
+						aria-haspopup="dialog"
+						onclick={openPicker}
+					>
+						<span aria-hidden="true">📅</span>
+						<span>{dueLabel(due, today).text}</span>
+					</button>
+					<!-- Invisible, but laid over the chip so the browser's picker opens next to it. -->
+					<input
+						bind:this={picker}
+						type="date"
+						tabindex="-1"
+						aria-hidden="true"
+						class="pointer-events-none absolute inset-0 h-full w-full opacity-0"
+						onchange={(e) => (picked = e.currentTarget.value || null)}
+					/>
 					<button
 						type="button"
 						class="rounded-full px-1.5 text-muted hover:bg-raised hover:text-ink"
-						aria-label="Keep “{parsed.dateText}” as text"
+						aria-label="Remove the date and keep “{parsed.dateText}” as text"
 						onclick={literal}>✕</button
 					>
 				</span>

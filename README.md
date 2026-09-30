@@ -3,7 +3,7 @@
 A small, single-account todo app: SvelteKit (Svelte 5) on Vercel, Postgres on Neon via Drizzle.
 
 - Today (`/`: due or overdue, plus anything pinned), Upcoming (next 14 days by day, then Later), Inbox (`/inbox`), lists and a Logbook
-- Quick-add from any view (`n` or `/` to focus, Enter to add) that understands dates and lists: `pay rent friday #home`, `dentist 12 sep`, `review next mon`, `water plants in 3 days`. Chips preview what was understood; ✕ or Esc keeps the text as typed. Adding in Today defaults the date to today.
+- Quick-add from any view (`n` or `/` to focus, Enter to add) that understands dates and lists: `pay rent friday #home`, `dentist 12 sep`, `review next mon`, `water plants in 3 days`. Also `next tue` / `next week tue` (that weekday in the following Mon–Sun week) and slash dates like `pay rent 3/10` (day-first; month-first for en-US browsers). Chips preview what was understood: click the date chip to pick a different date, and ✕ or Esc keeps the text as typed. Adding in Today defaults the date to today.
 - Due dates are calendar days, and "today" is the user's own day: the browser reports its time zone, and the server stores it
 - Drag and drop reordering in Inbox and lists (tasks and lists), or `Alt`+`↑`/`↓` on a focused row; `t` pins the focused task to Today
 - Detail panel for title, notes, due date, pin and list; soft delete with Undo

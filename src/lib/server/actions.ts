@@ -1,6 +1,6 @@
 import { error, fail, redirect, type RequestEvent } from '@sveltejs/kit';
 import { isDateString, todayIn } from '$lib/dates';
-import { parseQuickAdd } from '$lib/quick-add';
+import { parseQuickAdd, type DateOrder } from '$lib/quick-add';
 import { data } from './data';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -68,12 +68,18 @@ export const taskActions = {
 		// Only the Today view adds a default date; Upcoming, Inbox and lists add none.
 		let dueDate = text(form, 'view') === 'today' ? today : null;
 
+		// parse=false (the user dismissed a chip) keeps the text literal and ignores any picked date.
 		if (text(form, 'parse') !== 'false') {
+			// A date chosen in the chip's picker replaces the parsed one.
+			const picked = text(form, 'dueDate');
+			if (picked && !isDateString(picked)) return fail(400, { addError: 'Invalid due date' });
+
 			const lists = raw.includes('#') ? await data.lists.all(userId) : [];
-			const parsed = parseQuickAdd(raw, { today, lists });
+			const dateOrder = dateOrderFor(form, event.request);
+			const parsed = parseQuickAdd(raw, { today, lists, dateOrder });
 			title = parsed.title;
 			listId = parsed.listId ?? listId;
-			dueDate = parsed.dueDate ?? dueDate;
+			dueDate = picked || parsed.dueDate || dueDate;
 		}
 
 		const task = found(await data.tasks.create(userId, { title, listId, dueDate }));
@@ -196,6 +202,18 @@ export const listActions = {
 };
 
 export const appActions = { ...taskActions, ...listActions };
+
+/**
+ * Day/month order for slash dates: a parsing setting, not a parse result. The
+ * client sends its locale's order; anything unexpected means day-first. Without
+ * JS there's no field, so the browser's preferred language decides (en-US ->
+ * month-first).
+ */
+export function dateOrderFor(form: FormData, request: Request): DateOrder {
+	if (form.has('dateOrder')) return text(form, 'dateOrder') === 'mdy' ? 'mdy' : 'dmy';
+	const preferred = request.headers.get('accept-language')?.split(',')[0]?.split(';')[0];
+	return preferred?.trim().toLowerCase() === 'en-us' ? 'mdy' : 'dmy';
+}
 
 /** The task open in the detail panel via ?task=<id> (the no-JS path; with JS it's shallow routing). */
 export async function selectedTask(userId: string, url: URL) {

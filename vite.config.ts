@@ -23,9 +23,10 @@ export default defineConfig({
 	],
 	test: {
 		expect: { requireAssertions: true },
-		// Each test file boots its own in-memory Postgres (PGlite): a few seconds and ~1 GB each,
-		// so cap parallelism to keep `pnpm test` from exhausting memory next to `pnpm dev`.
-		maxWorkers: 2,
+		// Each test file boots its own in-memory Postgres (PGlite): a few seconds and ~1 GB each.
+		// One worker keeps `pnpm test` from exhausting memory next to `pnpm dev` (which also runs
+		// PGlite), and on an 8 GB machine it's faster than two anyway (16.8s vs 19.8s).
+		maxWorkers: 1,
 		hookTimeout: 60_000,
 		testTimeout: 30_000,
 		projects: [
