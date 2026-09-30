@@ -36,6 +36,13 @@
       "when": 1790766821024,
       "tag": "0004_recurring_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790788165597,
+      "tag": "0005_repeat_requires_due",
+      "breakpoints": true
     }
   ]
 }

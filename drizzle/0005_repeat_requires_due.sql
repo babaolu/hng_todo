@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD CONSTRAINT "tasks_repeat_has_due" CHECK ("tasks"."repeat_rule" is null or "tasks"."due_date" is not null);

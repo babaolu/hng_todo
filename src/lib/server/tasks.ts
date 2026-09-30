@@ -16,7 +16,13 @@ import {
 } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { isDateString } from '../dates';
-import { firstOccurrence, nextAfterCompletion, parseRule, type RepeatRule } from '../repeat';
+import {
+	firstOccurrence,
+	nextAfterCompletion,
+	parseRule,
+	recurringDue,
+	type RepeatRule
+} from '../repeat';
 import { lists, tasks, type Task } from './db/schema';
 import type { Db } from './db/types';
 import { generateKeyBetween, keyBetween } from './ordering';
@@ -73,6 +79,23 @@ export function createTaskStore(db: Db) {
 
 	/** Due today or earlier, or pinned to Today. `today` is the user's local date. */
 	const inToday = (today: string) => or(lte(tasks.dueDate, today), eq(tasks.pinnedToday, true));
+
+	/**
+	 * Clearing the due date of a recurring task gives it the rule's first
+	 * occurrence on or after `today` instead (the database's CHECK is the backstop).
+	 */
+	async function keepRecurringDue<V extends { dueDate?: string | null }>(
+		userId: string,
+		id: string,
+		values: V,
+		today: string | undefined
+	): Promise<V> {
+		if (values.dueDate !== null) return values;
+		const task = await get(userId, id);
+		if (!task?.repeatRule) return values;
+		if (!today) throw new Error("today is required to clear a recurring task's due date");
+		return { ...values, dueDate: recurringDue(task.repeatRule, null, today) };
+	}
 
 	async function update(userId: string, id: string, values: Partial<Task>) {
 		const [row] = await db
@@ -150,19 +173,23 @@ export function createTaskStore(db: Db) {
 				listId: ListId;
 				dueDate?: string | null;
 				repeatRule?: RepeatRule | null;
+				/** The user's today: gives an undated recurring task its first occurrence. */
+				today?: string;
 			}
 		) {
 			if (!(await ownsList(userId, input.listId))) return null;
 			if (input.dueDate != null && !isDateString(input.dueDate)) return null;
 			const rule = input.repeatRule ? parseRule(input.repeatRule) : null;
-			if (input.repeatRule && (!rule || !input.dueDate)) return null;
+			if (input.repeatRule && !rule) return null;
+			if (rule && !input.dueDate && !input.today) return null;
+			const dueDate = recurringDue(rule, input.dueDate, input.today ?? '');
 			const [row] = await db
 				.insert(tasks)
 				.values({
 					userId,
 					listId: input.listId,
 					title: input.title,
-					dueDate: input.dueDate ?? null,
+					dueDate,
 					repeatRule: rule,
 					seriesId: rule ? randomUUID() : null,
 					order: await topKey(userId, input.listId)
@@ -171,7 +198,11 @@ export function createTaskStore(db: Db) {
 			return row;
 		},
 
-		update(
+		/**
+		 * `today` (the user's day) is needed when clearing the due date: a recurring
+		 * task can't lose it, so it goes to the rule's first occurrence instead.
+		 */
+		async update(
 			userId: string,
 			id: string,
 			values: {
@@ -179,16 +210,17 @@ export function createTaskStore(db: Db) {
 				notes?: string | null;
 				dueDate?: string | null;
 				pinnedToday?: boolean;
-			}
+			},
+			today?: string
 		) {
-			if (values.dueDate != null && !isDateString(values.dueDate)) return Promise.resolve(null);
-			return update(userId, id, values);
+			if (values.dueDate != null && !isDateString(values.dueDate)) return null;
+			return update(userId, id, await keepRecurringDue(userId, id, values, today));
 		},
 
-		/** Set or clear (null) the due date: a 'YYYY-MM-DD' calendar day. */
-		setDueDate(userId: string, id: string, dueDate: string | null) {
-			if (dueDate !== null && !isDateString(dueDate)) return Promise.resolve(null);
-			return update(userId, id, { dueDate });
+		/** Set or clear (null) the due date: a 'YYYY-MM-DD' calendar day. See `update` for `today`. */
+		async setDueDate(userId: string, id: string, dueDate: string | null, today?: string) {
+			if (dueDate !== null && !isDateString(dueDate)) return null;
+			return update(userId, id, await keepRecurringDue(userId, id, { dueDate }, today));
 		},
 
 		setPinned(userId: string, id: string, pinned: boolean) {
@@ -212,7 +244,7 @@ export function createTaskStore(db: Db) {
 			return update(userId, id, {
 				repeatRule: valid,
 				seriesId: task.seriesId ?? randomUUID(),
-				dueDate: firstOccurrence(valid, task.dueDate ?? today)
+				dueDate: firstOccurrence(valid, recurringDue(valid, task.dueDate, today)!)
 			});
 		},
 

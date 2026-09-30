@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
 	boolean,
+	check,
 	customType,
 	date,
 	index,
@@ -158,7 +159,9 @@ export const tasks = pgTable(
 		// Undo of a completion finds the occurrence generated from it.
 		index('tasks_previous_idx')
 			.on(t.previousId)
-			.where(sql`${t.previousId} is not null`)
+			.where(sql`${t.previousId} is not null`),
+		// A recurring task always has a due date (the store keeps it; this is the backstop).
+		check('tasks_repeat_has_due', sql`${t.repeatRule} is null or ${t.dueDate} is not null`)
 	]
 );
 

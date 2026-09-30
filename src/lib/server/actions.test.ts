@@ -191,6 +191,26 @@ describe('recurring tasks through the actions', () => {
 		expect(row).toMatchObject({ dueDate: '2030-01-03', repeatRule: null });
 	});
 
+	it('the panel: clearing the date of a recurring task gives the first occurrence from today', async () => {
+		const r = await add({ title: 'plants every 3 days' });
+		const id = r.task!.id;
+		const today = todayIn(ZONE);
+		const save = (fields: Record<string, string | string[]>) =>
+			taskActions.saveTask(ev({ id, title: 'plants', notes: '', repeatField: '1', ...fields }));
+		// empty date field, repeat kept
+		await save({ dueDate: '', repeat: 'daily', interval: '3' });
+		let [row] = await db.query.tasks.findMany({ where: (t, { eq }) => eq(t.id, id) });
+		expect(row).toMatchObject({ dueDate: today, repeatRule: { freq: 'daily', interval: 3 } });
+		// the no-JS Clear button, repeat kept
+		await save({ dueDate: '2030-01-01', clearDue: '1', repeat: 'daily', interval: '3' });
+		[row] = await db.query.tasks.findMany({ where: (t, { eq }) => eq(t.id, id) });
+		expect(row.dueDate).toBe(today);
+		// clearing the date and the repeat together leaves it undated
+		await save({ dueDate: '', repeat: 'none' });
+		[row] = await db.query.tasks.findMany({ where: (t, { eq }) => eq(t.id, id) });
+		expect(row).toMatchObject({ dueDate: null, repeatRule: null });
+	});
+
 	it('the panel rejects an invalid repeat with 400', async () => {
 		const r = await add({ title: 'x' });
 		const res: unknown = await taskActions.saveTask(

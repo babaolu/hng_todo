@@ -165,6 +165,20 @@ export function nextAfterCompletion(rule: RepeatRule, dueDate: string, today: st
 }
 
 /**
+ * A recurring task always has a due date. Every write that sets a due date or a
+ * rule goes through this: with a rule and no date, the date becomes the rule's
+ * first occurrence on or after today; otherwise the date is kept as given.
+ */
+export function recurringDue(
+	rule: RepeatRule | null | undefined,
+	dueDate: string | null | undefined,
+	today: string
+): string | null {
+	if (!rule) return dueDate ?? null;
+	return dueDate ?? firstOccurrence(rule, today);
+}
+
+/**
  * A rule's missing specifics (weekday, day of month, month) come from `start`,
  * which also becomes the anchor of its grid: "weekly" started on a Friday means
  * every Friday. Returns the complete rule.

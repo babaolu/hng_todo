@@ -247,3 +247,72 @@ describe('ending a series', () => {
 		expect(await store.complete(userId, t.id, TODAY)).toMatchObject({ next: null });
 	});
 });
+
+describe('a recurring task always has a due date', () => {
+	// TODAY is Thu 1 Oct 2026; everyMon's first occurrence from today is Mon 5 Oct.
+	it('setDueDate(null) gives the first occurrence on or after today instead', async () => {
+		const t = await recurring('2026-10-12');
+		expect((await store.setDueDate(userId, t.id, null, TODAY))!.dueDate).toBe('2026-10-05');
+	});
+
+	it('update({ dueDate: null }) does the same', async () => {
+		const t = await recurring('2026-10-12');
+		expect((await store.update(userId, t.id, { dueDate: null }, TODAY))!.dueDate).toBe(
+			'2026-10-05'
+		);
+	});
+
+	it('refuses to clear it without knowing today', async () => {
+		const t = await recurring('2026-10-12');
+		await expect(store.setDueDate(userId, t.id, null)).rejects.toThrow(/today is required/);
+		expect((await store.get(userId, t.id))!.dueDate).toBe('2026-10-12');
+	});
+
+	it('a non-recurring task can still lose its date', async () => {
+		const t = (await store.create(userId, { title: 'x', listId: null, dueDate: TODAY }))!;
+		expect((await store.setDueDate(userId, t.id, null))!.dueDate).toBeNull();
+	});
+
+	it('create: a repeat without a date gets its first occurrence from today', async () => {
+		const t = await store.create(userId, {
+			title: 'x',
+			listId: null,
+			repeatRule: everyMon,
+			today: TODAY
+		});
+		expect(t!.dueDate).toBe('2026-10-05');
+		// ...and without today it can't be created at all
+		expect(
+			await store.create(userId, { title: 'y', listId: null, repeatRule: everyMon })
+		).toBeNull();
+	});
+
+	it('the database rejects a recurring task without a due date (insert and update)', async () => {
+		const { sql } = await import('drizzle-orm');
+		/** The database's own error message (drizzle wraps it as "Failed query: …"). */
+		const dbError = async (query: Promise<unknown>) => {
+			try {
+				await query;
+				return 'no error';
+			} catch (e) {
+				const err = e as { cause?: { message?: string }; message: string };
+				return err.cause?.message ?? err.message;
+			}
+		};
+		expect(
+			await dbError(
+				db.execute(sql`
+					insert into tasks (user_id, title, "order", repeat_rule)
+					values (${userId}, 'bad', 'a0', ${JSON.stringify(everyMon)}::jsonb)
+				`)
+			)
+		).toMatch(/tasks_repeat_has_due/);
+		const t = await recurring('2026-10-12');
+		expect(
+			await dbError(db.execute(sql`update tasks set due_date = null where id = ${t.id}`))
+		).toMatch(/tasks_repeat_has_due/);
+		// clearing the rule and the date together is fine
+		await db.execute(sql`update tasks set due_date = null, repeat_rule = null where id = ${t.id}`);
+		expect((await store.get(userId, t.id))!).toMatchObject({ dueDate: null, repeatRule: null });
+	});
+});

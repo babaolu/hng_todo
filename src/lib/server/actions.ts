@@ -93,7 +93,9 @@ export const taskActions = {
 			repeatRule = parsed.repeat;
 		}
 
-		const task = found(await data.tasks.create(userId, { title, listId, dueDate, repeatRule }));
+		const task = found(
+			await data.tasks.create(userId, { title, listId, dueDate, repeatRule, today })
+		);
 		return {
 			added: { id: task.id, title: task.title, listId: task.listId, dueDate: task.dueDate }
 		};
@@ -172,9 +174,11 @@ export const taskActions = {
 			}
 		}
 
-		found(await data.tasks.update(userId, taskId, values));
-		if (repeat !== undefined)
-			found(await data.tasks.setRepeat(userId, taskId, repeat, todayIn(timeZone)));
+		const today = todayIn(timeZone);
+		// Ending a repeat goes first, so a cleared date isn't put back for a series that's ending.
+		if (repeat === null) found(await data.tasks.setRepeat(userId, taskId, null, today));
+		found(await data.tasks.update(userId, taskId, values, today));
+		if (repeat) found(await data.tasks.setRepeat(userId, taskId, repeat, today));
 		if (form.has('listId'))
 			found(await data.tasks.move(userId, taskId, optionalId(form, 'listId')));
 	},
