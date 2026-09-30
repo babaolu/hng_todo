@@ -10,6 +10,7 @@ import type { RepeatRule } from '$lib/repeat';
 import { createAuthStore } from './auth';
 import { lists, tasks, users } from './db/schema';
 import type { Db } from './db/types';
+import { createExportStore } from './export';
 import { createGuestStore } from './guests';
 import { createListStore } from './lists';
 import { createTaskStore } from './tasks';
@@ -146,6 +147,13 @@ describe.each([
 
 		it('activeCounts only counts A tasks', async () => {
 			expect(await taskStore.activeCounts(a)).toEqual({ inbox: 1, [A.list]: 1 });
+		});
+
+		it("search never returns B tasks, even for words only B's tasks contain", async () => {
+			expect((await taskStore.search(a, 'task')).map((t) => t.id)).toEqual([A.task]);
+			expect(await taskStore.search(a, 'B task')).toEqual([]);
+			expect(await taskStore.search(a, 'recurring')).toEqual([]);
+			expect(await taskStore.search(a, 'deleted')).toEqual([]);
 		});
 
 		it('countAll only counts A tasks (guest cap)', async () => {
@@ -309,6 +317,54 @@ describe.each([
 
 		it('remove cannot delete B lists or move their tasks to the Inbox', async () => {
 			for (const id of bListIds()) expect(await listStore.remove(a, id)).toBe(false);
+		});
+	});
+
+	describe('export', () => {
+		/** Every key anywhere in a JSON value. */
+		const keysOf = (value: unknown): string[] =>
+			Array.isArray(value)
+				? value.flatMap(keysOf)
+				: value && typeof value === 'object'
+					? Object.entries(value).flatMap(([k, v]) => [k, ...keysOf(v)])
+					: [];
+
+		it("contains only A's own lists and tasks", async () => {
+			const out = await createExportStore(db).build(a, 'UTC');
+			const ownTasks = await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.userId, a));
+			const ownLists = await db.select({ id: lists.id }).from(lists).where(eq(lists.userId, a));
+			expect(out.tasks.map((t) => t.id).sort()).toEqual(ownTasks.map((t) => t.id).sort());
+			expect(out.lists.map((l) => l.id).sort()).toEqual(ownLists.map((l) => l.id).sort());
+			const json = JSON.stringify(out);
+			for (const id of [B.id, B.list, B.otherList, ...bTaskIds()]) expect(json).not.toContain(id);
+		});
+
+		it('never contains account details: ids, emails, hashes, sessions, IPs, login attempts', async () => {
+			const out = await createExportStore(db).build(a, 'UTC');
+			const forbidden = [
+				'user_id',
+				'userId',
+				'email',
+				'password_hash',
+				'passwordHash',
+				'token_hash',
+				'tokenHash',
+				'session',
+				'sessions',
+				'guest_ip',
+				'guestIp',
+				'is_guest',
+				'isGuest',
+				'ip',
+				'login_attempts',
+				'attempted_at'
+			];
+			expect(keysOf(out).filter((k) => forbidden.includes(k))).toEqual([]);
+			const [me] = await db.select().from(users).where(eq(users.id, a));
+			const json = JSON.stringify(out);
+			expect(json).not.toContain(a);
+			expect(json).not.toContain(me.email);
+			expect(json).not.toContain(me.passwordHash);
 		});
 	});
 

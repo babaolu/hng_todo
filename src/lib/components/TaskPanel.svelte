@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { failureMessage } from '$lib/actions';
-	import { formatDay } from '$lib/dates';
+	import { formatDateTime, formatDay } from '$lib/dates';
 	import {
 		describe,
 		firstOccurrence,
@@ -14,6 +14,7 @@
 		ruleFromFields,
 		type RepeatChoice
 	} from '$lib/repeat';
+	import { isTypingTarget } from '$lib/keyboard';
 	import { toasts } from '$lib/toasts.svelte';
 	import type { List, Task } from '$lib/types';
 
@@ -136,8 +137,6 @@
 		event.preventDefault();
 		onclose();
 	}
-
-	const fmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 </script>
 
 <a
@@ -147,16 +146,24 @@
 	aria-hidden="true"
 	tabindex="-1"
 ></a>
+<!-- Esc inside a field closes the panel (global shortcuts are off while typing). -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <aside
+	onkeydown={(e) => {
+		if (e.key === 'Escape' && isTypingTarget(e.target)) {
+			e.preventDefault();
+			onclose();
+		}
+	}}
 	class="fixed inset-x-0 bottom-0 z-40 max-h-[85dvh] overflow-y-auto rounded-t-2xl border-t border-line bg-surface p-5 shadow-2xl md:inset-y-0 md:right-0 md:left-auto md:max-h-none md:w-[26rem] md:rounded-none md:border-t-0 md:border-l"
 	aria-label="Task details"
 >
 	<div class="flex items-center justify-between gap-2 text-sm text-muted">
 		<span>
 			{#if task.completedAt}
-				Completed {fmt.format(task.completedAt)}
+				Completed {formatDateTime(task.completedAt, page.data.timeZone ?? 'UTC', today)}
 			{:else}
-				Created {fmt.format(task.createdAt)}
+				Created {formatDateTime(task.createdAt, page.data.timeZone ?? 'UTC', today)}
 			{/if}
 		</span>
 		<a href={closeHref} onclick={close} class="-mr-2 btn-ghost" aria-label="Close">✕</a>

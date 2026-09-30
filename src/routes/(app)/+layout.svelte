@@ -1,8 +1,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { afterNavigate } from '$app/navigation';
-	import { isTyping } from '$lib/actions';
+	import { afterNavigate, goto } from '$app/navigation';
+	import ShortcutsDialog from '$lib/components/ShortcutsDialog.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
+	import {
+		createDispatcher,
+		onShortcut,
+		runShortcut,
+		SHORTCUTS,
+		type ShortcutAction
+	} from '$lib/keyboard';
 
 	let { data, children } = $props();
 	// Not bound with bind:checked: hydration would undo a tap made before JS loaded.
@@ -34,21 +41,65 @@
 		if (type !== 'enter') closeNav();
 	});
 
-	function onKey(event: KeyboardEvent) {
-		if (event.metaKey || event.ctrlKey || event.altKey || isTyping(event)) return;
-		if (event.key === 'n' || event.key === '/') {
-			const input = document.getElementById('quick-add');
-			if (!input) return;
-			event.preventDefault();
-			closeNav();
-			input.focus();
-		} else if (event.key === 'Escape') {
-			closeNav();
-		}
-	}
+	// ---- Keyboard: the app's one keydown listener (see $lib/keyboard) ----
+	let shortcutsDialog = $state<ShortcutsDialog>();
+	const desktop = () => matchMedia('(min-width: 768px)').matches;
+	const focusField = (id: string) => {
+		const el = document.getElementById(id);
+		if (!el) return false;
+		el.focus();
+		return true;
+	};
+
+	onMount(() => {
+		const dispatcher = createDispatcher(SHORTCUTS);
+		// Capture phase: runs before row-level handlers (e.g. drag and drop's Space).
+		const listener = (event: KeyboardEvent) => {
+			const action = dispatcher.handle(event);
+			if (action && runShortcut(action as ShortcutAction, event)) {
+				event.preventDefault();
+				event.stopPropagation();
+			}
+		};
+		window.addEventListener('keydown', listener, { capture: true });
+
+		const off = [
+			onShortcut('quickAdd', () => (closeNav(), focusField('quick-add'))),
+			onShortcut('search', () => {
+				// Phones: the search page has its own box; elsewhere the sidebar's, in the drawer.
+				if (!desktop() && focusField('search-page')) return true;
+				if (!desktop() && navToggle) navToggle.checked = true;
+				return focusField('search');
+			}),
+			onShortcut('goToday', () => (goto('/'), true)),
+			onShortcut('goUpcoming', () => (goto('/upcoming'), true)),
+			onShortcut('goInbox', () => (goto('/inbox'), true)),
+			onShortcut('help', () => (shortcutsDialog?.open(), true)),
+			// Esc: after the dialog (30) and the panel (20), the drawer, then clear focus.
+			onShortcut(
+				'escape',
+				() => {
+					if (!navToggle?.checked) return false;
+					closeNav();
+					return true;
+				},
+				10
+			),
+			onShortcut('escape', () => {
+				const el = document.activeElement as HTMLElement | null;
+				if (!el || el === document.body) return false;
+				el.blur();
+				return true;
+			})
+		];
+		return () => {
+			window.removeEventListener('keydown', listener, { capture: true });
+			off.forEach((unregister) => unregister());
+		};
+	});
 </script>
 
-<svelte:window onkeydown={onKey} />
+<ShortcutsDialog bind:this={shortcutsDialog} />
 
 <div class="min-h-dvh">
 	<!-- Mobile drawer: a checkbox so it also opens without JavaScript. -->

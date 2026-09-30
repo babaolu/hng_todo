@@ -60,12 +60,6 @@ export function failureMessage(result: ActionResult): string {
 	return "Something went wrong. Your change wasn't saved.";
 }
 
-/** True when a keypress should go to a text field rather than a shortcut. */
-export function isTyping(event: KeyboardEvent): boolean {
-	const el = event.target as HTMLElement | null;
-	return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
-}
-
 export const isTemp = (id: string) => id.startsWith('temp-');
 
 /** The nearest saved items either side of index `i` (skipping optimistic placeholders). */

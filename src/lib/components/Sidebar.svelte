@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
+	import { onShortcut } from '$lib/keyboard';
 	import { flip } from 'svelte/animate';
 	import { dndzone, type DndEvent } from 'svelte-dnd-action';
 	import { failureMessage, neighbours, postAction } from '$lib/actions';
 	import { toasts } from '$lib/toasts.svelte';
 	import type { List } from '$lib/types';
+	import SearchBox from './SearchBox.svelte';
 
 	type Props = {
 		lists: List[];
@@ -31,11 +34,13 @@
 			postAction('reorderList', { id: active[index].id, ...neighbours(active, index) });
 	}
 
-	function onListKey(event: KeyboardEvent, index: number) {
-		if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
-		event.preventDefault();
-		const target = index + (event.key === 'ArrowUp' ? -1 : 1);
-		if (target < 0 || target >= active.length) return;
+	/** Alt+↑/↓ on a focused list link (registered with the app's one listener). */
+	function moveFocusedList(direction: -1 | 1): boolean {
+		const id = (document.activeElement as HTMLElement | null)?.getAttribute?.('data-list-id');
+		const index = id ? active.findIndex((l) => l.id === id) : -1;
+		if (index === -1) return false;
+		const target = index + direction;
+		if (target < 0 || target >= active.length) return true;
 		const next = [...active];
 		const [list] = next.splice(index, 1);
 		next.splice(target, 0, list);
@@ -44,7 +49,16 @@
 		requestAnimationFrame(() =>
 			document.querySelector<HTMLElement>(`[data-list-id="${list.id}"]`)?.focus()
 		);
+		return true;
 	}
+
+	onMount(() => {
+		const off = [
+			onShortcut('moveUp', () => moveFocusedList(-1)),
+			onShortcut('moveDown', () => moveFocusedList(1))
+		];
+		return () => off.forEach((unregister) => unregister());
+	});
 
 	const isCurrent = (href: string) => page.url.pathname === href;
 	const link = (href: string) =>
@@ -55,6 +69,8 @@
 
 <nav class="flex h-full flex-col gap-6 overflow-y-auto p-3" aria-label="Main">
 	<div class="px-2 pt-1 text-sm font-semibold tracking-tight">Todo</div>
+
+	<SearchBox id="search" live="desktop" class="px-1" />
 
 	<ul class="space-y-px">
 		<li>
@@ -94,13 +110,12 @@
 			onconsider={consider}
 			onfinalize={finalize}
 		>
-			{#each active as list, index (list.id)}
+			{#each active as list (list.id)}
 				<li animate:flip={{ duration: FLIP_MS }} class="rounded-md">
 					<a
 						href="/lists/{list.id}"
 						draggable="false"
 						data-list-id={list.id}
-						onkeydown={(e) => onListKey(e, index)}
 						class={link(`/lists/${list.id}`)}
 					>
 						<span class="w-4 text-center text-muted" aria-hidden="true">•</span>
@@ -168,15 +183,24 @@
 		</details>
 	{/if}
 
+	<ul class="mt-auto space-y-px">
+		<li>
+			<a href="/settings" class={link('/settings')}>
+				<span class="w-4 text-center text-muted" aria-hidden="true">⚙</span>
+				<span class="flex-1">Settings</span>
+			</a>
+		</li>
+	</ul>
+
 	{#if guest}
-		<div class="mt-auto space-y-1 border-t border-line px-2 pt-3">
+		<div class="space-y-1 border-t border-line px-2 pt-3">
 			<p class="text-xs text-muted">Guest account</p>
 			<a href="/logout" class="-mx-2 btn-ghost w-full justify-start px-2 py-1 text-xs text-danger"
 				>Leave and delete guest data</a
 			>
 		</div>
 	{:else}
-		<div class="mt-auto flex items-center gap-2 border-t border-line px-2 pt-3">
+		<div class="flex items-center gap-2 border-t border-line px-2 pt-3">
 			<span class="min-w-0 flex-1 truncate text-xs text-muted" title={email}>{email}</span>
 			<form method="POST" action="/logout">
 				<button class="btn-ghost px-2 py-1 text-xs">Log out</button>

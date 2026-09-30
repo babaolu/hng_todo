@@ -2,6 +2,7 @@ import { env } from '$env/dynamic/private';
 import { createAuthStore } from './auth';
 import { createNeonDb } from './db/neon';
 import type { Db } from './db/types';
+import { createExportStore } from './export';
 import { createGuestStore } from './guests';
 import { createListStore } from './lists';
 import { createTaskStore } from './tasks';
@@ -9,6 +10,7 @@ import { createTaskStore } from './tasks';
 function build(db: Db) {
 	return {
 		auth: createAuthStore(db),
+		exports: createExportStore(db),
 		guests: createGuestStore(db),
 		lists: createListStore(db),
 		tasks: createTaskStore(db)
@@ -38,6 +40,9 @@ export function useDb(db: Db) {
 export const data = {
 	get auth() {
 		return get().auth;
+	},
+	get exports() {
+		return get().exports;
 	},
 	get guests() {
 		return get().guests;

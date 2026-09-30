@@ -8,6 +8,10 @@ A small, single-account todo app: SvelteKit (Svelte 5) on Vercel, Postgres on Ne
 - Recurring tasks: end a quick-add with a repeat (`standup daily`, `gym every mon and thu`, `water plants every 3 days`, `pay rent monthly on the 1st`) or set one in the detail panel. Completing a recurring task logs it and creates the next occurrence from the schedule, skipping missed ones. Removing the repeat or deleting the task ends the series.
 - Drag and drop reordering in Inbox and lists (tasks and lists), or `Alt`+`↑`/`↓` on a focused row; `t` pins the focused task to Today
 - Detail panel for title, notes, due date, pin and list; soft delete with Undo
+- Search (`/search?q=…`, or `/` from anywhere) across titles and notes; every word must match
+- Keyboard shortcuts: `j`/`k` move, `x`/Space complete, `e` open, `t` pin, `n` new task, `/` search, `g` then `t`/`u`/`i` to go to Today/Upcoming/Inbox, `?` lists them all. They're handled by one listener, in `src/lib/keyboard.ts`
+- Settings → "Download my data (JSON)": your lists and tasks, without any account details
+- Installable (web app manifest and icons). The service worker (`src/service-worker.ts`) caches only hashed build assets and an offline page, never pages or data; the rules are in `src/lib/sw-policy.ts`
 - Works without JavaScript (form actions + progressive enhancement), light and dark themes, usable at 360px
 
 ## Local setup

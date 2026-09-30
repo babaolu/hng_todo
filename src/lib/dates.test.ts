@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
 	addDays,
+	dayOf,
 	daysBetween,
 	dueLabel,
+	formatDateTime,
 	formatDay,
 	isDateString,
 	isValidTimeZone,
@@ -91,5 +93,20 @@ describe('labels', () => {
 		expect(dueLabel('2026-10-09', today)).toEqual({ text: 'Fri 9 Oct', overdue: false });
 		expect(dueLabel('2026-09-30', today)).toEqual({ text: 'Yesterday', overdue: true });
 		expect(dueLabel('2026-09-28', today)).toEqual({ text: '3 days ago', overdue: true });
+	});
+});
+
+describe('fixed formats for instants', () => {
+	it('dayOf is the calendar day in the zone', () => {
+		const late = new Date('2026-09-30T23:30:00Z'); // 00:30 on 1 Oct in Lagos
+		expect(dayOf(late, 'UTC')).toBe('2026-09-30');
+		expect(dayOf(late, 'Africa/Lagos')).toBe('2026-10-01');
+	});
+
+	it('formatDateTime uses the app format and a 24-hour clock in the zone', () => {
+		const at = new Date('2026-09-30T16:58:00Z');
+		expect(formatDateTime(at, 'Africa/Lagos', '2026-09-30')).toBe('Wed 30 Sep, 17:58');
+		expect(formatDateTime(at, 'America/New_York', '2026-09-30')).toBe('Wed 30 Sep, 12:58');
+		expect(formatDateTime(at, 'Africa/Lagos', '2027-01-01')).toBe('Wed 30 Sep 2026, 17:58');
 	});
 });

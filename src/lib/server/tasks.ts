@@ -6,6 +6,7 @@ import {
 	eq,
 	getTableColumns,
 	gt,
+	ilike,
 	isNotNull,
 	isNull,
 	lte,
@@ -29,6 +30,20 @@ import { generateKeyBetween, keyBetween } from './ordering';
 
 /** null = Inbox */
 export type ListId = string | null;
+
+export const SEARCH_LIMIT = 100;
+
+/** The words of a search query; nothing until the query has at least 2 characters. */
+export function searchWords(query: string): string[] {
+	const trimmed = query.trim();
+	if (trimmed.length < 2) return [];
+	return trimmed.split(/\s+/).slice(0, 10);
+}
+
+/** LIKE treats % and _ as wildcards and \ as its escape character: make them literal. */
+export function escapeLike(text: string): string {
+	return text.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
 
 export type TaskStore = ReturnType<typeof createTaskStore>;
 
@@ -155,6 +170,32 @@ export function createTaskStore(db: Db) {
 		},
 
 		get,
+
+		/**
+		 * Search titles and notes, case-insensitively. Every word must appear in the
+		 * title or the notes; % _ and \ match literally. Open tasks first (by due
+		 * date), then completed ones (newest first). Queries under 2 characters match nothing.
+		 */
+		search(userId: string, query: string, limit = SEARCH_LIMIT) {
+			const words = searchWords(query);
+			if (words.length === 0) return Promise.resolve([] as Task[]);
+			const matches = words.map((word) => {
+				const pattern = `%${escapeLike(word)}%`;
+				return or(ilike(tasks.title, pattern), ilike(tasks.notes, pattern));
+			});
+			return db
+				.select()
+				.from(tasks)
+				.where(and(live(userId), ...matches))
+				.orderBy(
+					sql`${tasks.completedAt} is not null`,
+					sql`${tasks.dueDate} asc nulls last`,
+					desc(tasks.completedAt),
+					desc(tasks.createdAt),
+					asc(tasks.id)
+				)
+				.limit(limit);
+		},
 
 		/** Every task row the user has, soft-deleted and completed included (for guest caps). */
 		async countAll(userId: string): Promise<number> {

@@ -2,18 +2,20 @@
 	import { enhance } from '$app/forms';
 	import { pushState } from '$app/navigation';
 	import { page } from '$app/state';
-	import { tick, type Snippet } from 'svelte';
+	import { onMount, tick, type Snippet } from 'svelte';
 	import { flip } from 'svelte/animate';
 	import { dndzone, setKeyboardDragTrigger, type DndEvent } from 'svelte-dnd-action';
-	import { failureMessage, isTemp, isTyping, neighbours, postAction } from '$lib/actions';
-	import { daysBetween, dueLabel, formatDay } from '$lib/dates';
+	import { failureMessage, isTemp, neighbours, postAction } from '$lib/actions';
+	import { onShortcut } from '$lib/keyboard';
+	import { dayOf, daysBetween, dueLabel, formatDay } from '$lib/dates';
+	import { highlight } from '$lib/highlight';
 	import { describe } from '$lib/repeat';
 	import { toasts } from '$lib/toasts.svelte';
 	import type { List, Task } from '$lib/types';
 	import QuickAdd, { type Added } from './QuickAdd.svelte';
 	import TaskPanel from './TaskPanel.svelte';
 
-	type Mode = 'active' | 'today' | 'upcoming' | 'logbook';
+	type Mode = 'active' | 'today' | 'upcoming' | 'logbook' | 'search';
 	type Props = {
 		tasks: Task[];
 		lists: List[];
@@ -23,10 +25,24 @@
 		selected: Task | null;
 		/** active = Inbox or a list (manual order); today / upcoming are ordered by date. */
 		mode?: Mode;
+		/** Search: words to highlight in titles. */
+		highlightWords?: string[];
+		/** Show the quick-add box (not on the search page). */
+		quickAdd?: boolean;
 		header: Snippet;
 		empty: string;
 	};
-	let { tasks, lists, listId, selected, mode = 'active', header, empty }: Props = $props();
+	let {
+		tasks,
+		lists,
+		listId,
+		selected,
+		mode = 'active',
+		highlightWords = [],
+		quickAdd = true,
+		header,
+		empty
+	}: Props = $props();
 
 	/** How many days ahead Upcoming shows one group per day before "Later". */
 	const UPCOMING_DAYS = 14;
@@ -37,6 +53,7 @@
 	// Optimistic updates overwrite this until the next load replaces it.
 	let items = $derived(tasks);
 	const today = $derived(page.data.today as string);
+	const timeZone = $derived((page.data.timeZone as string) ?? 'UTC');
 	const reorderable = $derived(mode === 'active');
 	const listName = $derived(new Map(lists.map((l) => [l.id, l.name])));
 	const FLIP_MS = 150;
@@ -52,6 +69,12 @@
 						{ key: 'today', title: 'Today', tasks: rest }
 					]
 				: [{ key: 'today', title: null, tasks: rest }];
+		}
+		if (mode === 'search') {
+			return [
+				{ key: 'active', title: 'Active', tasks: items.filter((t) => !t.completedAt) },
+				{ key: 'completed', title: 'Completed', tasks: items.filter((t) => t.completedAt) }
+			];
 		}
 		if (mode === 'upcoming') {
 			const byKey = new Map<string, Group>();
@@ -75,6 +98,7 @@
 		if (mode === 'today') return (!!task.dueDate && task.dueDate <= today) || task.pinnedToday;
 		if (mode === 'upcoming') return !!task.dueDate && task.dueDate > today;
 		if (mode === 'active') return task.listId === listId;
+		if (mode === 'search') return true;
 		return false;
 	}
 
@@ -111,10 +135,6 @@
 		const id = openId;
 		pushState(page.url.pathname, { taskId: null });
 		if (id) tick().then(() => focusRow(id));
-	}
-
-	function focusRow(id: string) {
-		document.querySelector<HTMLElement>(`[data-task-id="${id}"]`)?.focus();
 	}
 
 	function patch(id: string, changes: Partial<Task>) {
@@ -197,35 +217,94 @@
 		focusRow(task.id);
 	}
 
-	function onRowKey(event: KeyboardEvent, task: Task) {
-		if (isTyping(event) || event.metaKey || event.ctrlKey) return;
-		const index = visible.indexOf(task);
-		const onRow = event.target === event.currentTarget;
-		const vertical = event.key === 'ArrowUp' || event.key === 'ArrowDown';
-		const direction = event.key === 'ArrowUp' ? -1 : 1;
-		const temp = isTemp(task.id);
+	// ---- Keyboard (registered with the app's one listener; see $lib/keyboard) ----
 
-		if (vertical && event.altKey) {
-			event.preventDefault();
-			if (reorderable) step(index, direction);
-		} else if (vertical || event.key === 'j' || event.key === 'k') {
-			event.preventDefault();
-			const to = visible[index + (event.key === 'k' || event.key === 'ArrowUp' ? -1 : 1)];
-			if (to) focusRow(to.id);
-		} else if (event.key === 'Enter' && onRow && !temp) {
-			open(event, task);
-		} else if (event.key === 't' && !event.altKey && !temp && !task.completedAt) {
-			event.preventDefault();
-			togglePin(task);
-		} else if ((event.key === 'Delete' || event.key === 'Backspace') && !temp) {
-			event.preventDefault();
-			const neighbour = visible[index + 1] ?? visible[index - 1];
-			remove(task).then(() => neighbour && focusRow(neighbour.id));
-		}
+	/** The task whose row (or something inside it) has focus. */
+	function focusedTask(): Task | null {
+		const row = (document.activeElement as HTMLElement | null)?.closest?.('[data-task-id]');
+		const id = row?.getAttribute('data-task-id');
+		return (id && visible.find((t) => t.id === id)) || null;
 	}
 
-	function onWindowKey(event: KeyboardEvent) {
-		if (event.key === 'Escape' && openTask && !event.defaultPrevented) close();
+	function focusRow(id: string) {
+		const row = document.querySelector<HTMLElement>(`[data-task-id="${id}"]`);
+		row?.focus();
+		row?.scrollIntoView({ block: 'nearest' });
+	}
+
+	/** Move focus through the visible tasks; with no task focused, start at the top / bottom. */
+	function moveFocus(direction: 1 | -1, onlyFromARow: boolean) {
+		const current = focusedTask();
+		if (!current && onlyFromARow) return false;
+		const index = current ? visible.indexOf(current) : direction === 1 ? -1 : visible.length;
+		const to = visible[index + direction];
+		if (to) focusRow(to.id);
+		return !!to || !!current;
+	}
+
+	/** Run `fn` on the focused task (not an optimistic placeholder). */
+	const withTask = (fn: (task: Task) => void) => () => {
+		const task = focusedTask();
+		if (!task || isTemp(task.id)) return false;
+		fn(task);
+		return true;
+	};
+
+	onMount(() => {
+		const off = [
+			onShortcut('next', () => moveFocus(1, false)),
+			onShortcut('prev', () => moveFocus(-1, false)),
+			// Plain arrows only move between tasks once one has focus (otherwise they scroll).
+			onShortcut('rowDown', () => moveFocus(1, true)),
+			onShortcut('rowUp', () => moveFocus(-1, true)),
+			onShortcut(
+				'toggle',
+				withTask((task) =>
+					document
+						.querySelector<HTMLButtonElement>(`[data-task-id="${task.id}"] button[role=checkbox]`)
+						?.click()
+				)
+			),
+			onShortcut(
+				'open',
+				withTask((task) => openTask_(task))
+			),
+			// Enter opens only from the row itself; on a button inside it, Enter presses the button.
+			onShortcut('openRow', (event) => {
+				const el = event.target as HTMLElement;
+				return el.hasAttribute?.('data-task-id') ? withTask((task) => openTask_(task))() : false;
+			}),
+			onShortcut('pin', () => {
+				const task = focusedTask();
+				if (!task || isTemp(task.id) || task.completedAt) return false;
+				togglePin(task);
+				return true;
+			}),
+			onShortcut(
+				'delete',
+				withTask((task) => {
+					const index = visible.indexOf(task);
+					const neighbour = visible[index + 1] ?? visible[index - 1];
+					remove(task).then(() => neighbour && focusRow(neighbour.id));
+				})
+			),
+			onShortcut('moveUp', () => reorderFocused(-1)),
+			onShortcut('moveDown', () => reorderFocused(1)),
+			// Esc closes the panel (after the shortcuts dialog, before the drawer).
+			onShortcut('escape', () => (openTask ? (close(), true) : false), 20)
+		];
+		return () => off.forEach((unregister) => unregister());
+	});
+
+	function openTask_(task: Task) {
+		pushState(`?task=${task.id}`, { taskId: task.id });
+	}
+
+	function reorderFocused(direction: -1 | 1) {
+		const task = focusedTask();
+		if (!task || !reorderable || isTemp(task.id)) return false;
+		step(items.indexOf(task), direction);
+		return true;
 	}
 
 	const rowClass = (task: Task) =>
@@ -233,8 +312,6 @@
 			isTemp(task.id) ? 'opacity-60' : ''
 		} ${openId === task.id ? 'bg-raised' : ''}`;
 </script>
-
-<svelte:window onkeydown={onWindowKey} />
 
 {#snippet row(task: Task)}
 	{@const done = !!task.completedAt}
@@ -287,8 +364,19 @@
 		onclick={(e) => !temp && open(e, task)}
 		class="flex min-w-0 flex-1 items-center gap-2 py-1"
 	>
-		<span class="min-w-0 flex-1 truncate {done ? 'text-muted line-through' : ''}">{task.title}</span
-		>
+		<span class="flex min-w-0 flex-1 flex-col">
+			<span class="truncate {done ? 'text-muted line-through' : ''}">
+				{#each highlight(task.title, highlightWords) as segment, i (i)}
+					{#if segment.match}<mark class="rounded-sm bg-accent-soft px-0.5 text-inherit"
+							>{segment.text}</mark
+						>{:else}{segment.text}{/if}
+				{/each}
+			</span>
+			{#if task.repeatRule}
+				<!-- Phones: the repeat on its own line, so it's visible without a tooltip. -->
+				<span class="truncate text-xs text-muted sm:hidden">↻ {describe(task.repeatRule)}</span>
+			{/if}
+		</span>
 		<span class="flex shrink-0 items-center gap-2 text-xs text-muted">
 			{#if task.pinnedToday && !done}
 				<span class="text-accent" title="Pinned to Today" aria-label="Pinned to Today">★</span>
@@ -296,22 +384,18 @@
 			{#if task.notes}
 				<span title="Has notes" aria-label="Has notes">≡</span>
 			{/if}
-			{#if (mode === 'today' || mode === 'upcoming') && task.listId && listName.has(task.listId)}
+			{#if (mode === 'today' || mode === 'upcoming' || mode === 'search') && task.listId && listName.has(task.listId)}
 				<span class="hidden max-w-28 truncate sm:inline">{listName.get(task.listId)}</span>
 			{/if}
 			{#if task.repeatRule}
 				{@const repeats = describe(task.repeatRule)}
-				<span title="Repeats: {repeats}" aria-label="Repeats: {repeats}">
-					↻<span class="hidden sm:inline"> {repeats}</span>
-				</span>
+				<span class="hidden sm:inline" title="Repeats: {repeats}">↻ {repeats}</span>
 			{/if}
 			{#if due}
 				<span class={due.overdue && !done ? 'italic' : ''}>{due.text}</span>
 			{/if}
-			{#if mode === 'logbook' && task.completedAt}
-				<span title="Completed">
-					✓ {task.completedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-				</span>
+			{#if (mode === 'logbook' || mode === 'search') && task.completedAt}
+				<span title="Completed">✓ {formatDay(dayOf(task.completedAt, timeZone), today)}</span>
 			{/if}
 		</span>
 	</a>
@@ -320,15 +404,17 @@
 <div class="space-y-5">
 	{@render header()}
 
-	<QuickAdd
-		{listId}
-		{lists}
-		{today}
-		view={mode === 'today' ? 'today' : mode === 'upcoming' ? 'upcoming' : 'list'}
-		placeholder={mode === 'logbook' ? 'Add to Inbox' : 'Add a task'}
-		onadd={addOptimistic}
-		onadded={added}
-	/>
+	{#if quickAdd}
+		<QuickAdd
+			{listId}
+			{lists}
+			{today}
+			view={mode === 'today' ? 'today' : mode === 'upcoming' ? 'upcoming' : 'list'}
+			placeholder={mode === 'logbook' ? 'Add to Inbox' : 'Add a task'}
+			onadd={addOptimistic}
+			onadded={added}
+		/>
+	{/if}
 
 	{#if page.form?.deleted}
 		<!-- Undo without JavaScript. With JS, the toast handles this instead. -->
@@ -362,13 +448,12 @@
 			onfinalize={finalize}
 		>
 			{#each items as task (task.id)}
-				<!-- svelte-dnd-action makes each row focusable for keyboard dragging; these keys extend that. -->
-				<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+				<!-- Rows are focusable so the list can be driven from the keyboard ($lib/keyboard). -->
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 				<li
 					animate:flip={{ duration: FLIP_MS }}
 					data-task-id={task.id}
 					tabindex="0"
-					onkeydown={(e) => onRowKey(e, task)}
 					class={rowClass(task)}
 				>
 					{@render row(task)}
@@ -390,13 +475,12 @@
 					{/if}
 					<ul class="-mx-2 space-y-px">
 						{#each group.tasks as task (task.id)}
-							<!-- Rows are focusable so the list can be driven from the keyboard. -->
-							<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+							<!-- Rows are focusable so the list can be driven from the keyboard ($lib/keyboard). -->
+							<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 							<li
 								animate:flip={{ duration: FLIP_MS }}
 								data-task-id={task.id}
 								tabindex="0"
-								onkeydown={(e) => onRowKey(e, task)}
 								class={rowClass(task)}
 							>
 								{@render row(task)}
@@ -410,10 +494,12 @@
 
 	{#if items.length > 0}
 		<p class="hidden text-xs text-muted md:block">
-			{#if reorderable && items.length > 1}
-				Drag to reorder, or focus a task and press <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>.
+			{#if reorderable && items.length > 1}Drag to reorder, or <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd
+					>↓</kbd
+				>.
 			{/if}
-			<kbd>Enter</kbd> opens, <kbd>T</kbd> pins to Today, <kbd>Delete</kbd> deletes.
+			<kbd>j</kbd>/<kbd>k</kbd> move, <kbd>x</kbd> completes, <kbd>e</kbd> opens, <kbd>t</kbd> pins.
+			<kbd>?</kbd> shows all shortcuts.
 		</p>
 	{/if}
 </div>

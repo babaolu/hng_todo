@@ -66,6 +66,25 @@ export function todayIn(timeZone: string, now: Date = new Date()): string {
 	return fromParts(get('year'), get('month'), get('day'));
 }
 
+/** The calendar day an instant falls on in a time zone (e.g. when a task was completed). */
+export function dayOf(instant: Date, timeZone: string): string {
+	return todayIn(timeZone, instant);
+}
+
+/**
+ * An instant in the app's fixed format, in the user's zone: "Wed 30 Sep, 17:58".
+ * The only way dates with times are shown: never the browser's own locale format.
+ */
+export function formatDateTime(instant: Date, timeZone: string, today: string): string {
+	const time = new Intl.DateTimeFormat('en-GB', {
+		timeZone: isValidTimeZone(timeZone) ? timeZone : 'UTC',
+		hour: '2-digit',
+		minute: '2-digit',
+		hourCycle: 'h23'
+	}).format(instant);
+	return `${formatDay(dayOf(instant, timeZone), today)}, ${time}`;
+}
+
 /** "Fri 3 Oct", plus the year when it isn't the same year as `today`. */
 export function formatDay(date: string, today: string): string {
 	const d = new Date(toUtc(date));
