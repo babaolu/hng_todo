@@ -78,7 +78,7 @@ describe('creating a guest', () => {
 		const today = todayIn('UTC', now); // 2026-10-01
 		const all = await db.select().from(tasks).where(eq(tasks.userId, g.userId));
 		const by = (title: string) => all.find((t) => t.title === title)!;
-		expect(all).toHaveLength(8);
+		expect(all).toHaveLength(9);
 		expect(
 			(await db.select().from(lists).where(eq(lists.userId, g.userId))).map((l) => l.name).sort()
 		).toEqual(['Home', 'Work']);
@@ -91,6 +91,11 @@ describe('creating a guest', () => {
 		expect(by('Team retro').dueDate).toBe(addDays(today, 7));
 		expect(by('Ideas for the weekend')).toMatchObject({ dueDate: null, listId: null });
 		expect(by('Set up a guest account').completedAt).not.toBeNull();
+		expect(by('Water the plants')).toMatchObject({
+			dueDate: today,
+			repeatRule: { freq: 'daily', interval: 3, anchor: today }
+		});
+		expect(by('Read me: how quick-add works').notes).toContain('every mon and thu');
 		const store = taskStore();
 		expect((await store.listToday(g.userId, today)).map((t) => t.title)).toEqual(
 			expect.arrayContaining([

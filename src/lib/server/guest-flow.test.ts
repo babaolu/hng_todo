@@ -140,7 +140,7 @@ describe('creating a guest from /login', () => {
 	it('creates a guest with sample data, signs it in, and uses a valid tz cookie', async () => {
 		const { user } = await createGuestViaAction('203.0.113.5', 'Africa/Lagos');
 		expect(user).toMatchObject({ isGuest: true, timeZone: 'Africa/Lagos' });
-		expect((await db.select().from(tasks).where(eq(tasks.userId, user.id))).length).toBe(8);
+		expect((await db.select().from(tasks).where(eq(tasks.userId, user.id))).length).toBe(9);
 	});
 
 	it('falls back to UTC for an invalid tz cookie', async () => {
@@ -271,7 +271,7 @@ describe('per-guest caps (real users are not capped)', () => {
 
 	it('a guest at 200 tasks (deleted ones included) gets a friendly error', async () => {
 		const { user } = await createGuestViaAction();
-		await fill(user.id, 200 - 8 - 1); // 8 sample tasks
+		await fill(user.id, 200 - 9 - 1); // 9 sample tasks
 		const ok = await taskActions.addTask(event('/', { user, form: { title: 'one more' } }));
 		expect(isActionFailure(ok)).toBe(false);
 		// soft-deleting doesn't free a slot
@@ -281,6 +281,29 @@ describe('per-guest caps (real users are not capped)', () => {
 			403,
 			{ addError: 'Guest accounts can hold up to 200 tasks, including completed and deleted ones.' }
 		]);
+	});
+
+	it('a guest at the cap can still complete a recurring task; the next one just is not created', async () => {
+		const { user } = await createGuestViaAction();
+		const [plants] = await db.select().from(tasks).where(eq(tasks.title, 'Water the plants'));
+		await fill(user.id, 200 - 9);
+		const r: unknown = await taskActions.toggleTask(
+			event('/', { user, form: { id: plants.id, completed: 'true' } })
+		);
+		expect(r).toEqual({ completed: { next: null, capped: true } });
+		const [after] = await db.select().from(tasks).where(eq(tasks.id, plants.id));
+		expect(after.completedAt).not.toBeNull();
+		expect(await createTaskStore(db).countAll(user.id)).toBe(200);
+	});
+
+	it('a guest under the cap gets the next occurrence', async () => {
+		const { user } = await createGuestViaAction();
+		const [plants] = await db.select().from(tasks).where(eq(tasks.title, 'Water the plants'));
+		const r = (await taskActions.toggleTask(
+			event('/', { user, form: { id: plants.id, completed: 'true' } })
+		)) as { completed: { next: { dueDate: string } | null; capped: boolean } };
+		expect(r.completed.capped).toBe(false);
+		expect(r.completed.next?.dueDate).toBeTruthy();
 	});
 
 	it('a real user with 200+ tasks can keep adding', async () => {

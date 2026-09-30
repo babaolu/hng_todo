@@ -47,7 +47,7 @@ async function add(fields: Record<string, string>, headers?: Record<string, stri
 	if (isActionFailure(result)) return { status: result.status, data: result.data };
 	return {
 		status: 200,
-		task: (result as { added: { title: string; dueDate: string | null } }).added
+		task: (result as { added: { id: string; title: string; dueDate: string | null } }).added
 	};
 }
 
@@ -121,5 +121,87 @@ describe('addTask: slash-date order', () => {
 		expect(dateOrderFor(form('dmy'), req)).toBe('dmy');
 		expect(dateOrderFor(form('<script>'), req)).toBe('dmy');
 		expect(dateOrderFor(form(), req)).toBe('mdy');
+	});
+});
+
+describe('recurring tasks through the actions', () => {
+	const user = () => ({
+		id: userId,
+		email: 'me@example.com',
+		timeZone: ZONE,
+		isGuest: false,
+		guestExpiresAt: null
+	});
+	function ev(fields: Record<string, string | string[]>) {
+		const body = new FormData();
+		for (const [k, v] of Object.entries(fields)) {
+			for (const value of Array.isArray(v) ? v : [v]) body.append(k, value);
+		}
+		return {
+			locals: { user: user() },
+			request: new Request('http://localhost/?/x', { method: 'POST', body })
+		} as unknown as RequestEvent;
+	}
+
+	it('quick-add with a repeat stores the rule and the first occurrence', async () => {
+		const r = await add({ title: 'standup every mon and thu' });
+		const [row] = await db.query.tasks.findMany({
+			where: (t, { eq }) => eq(t.id, r.task!.id)
+		});
+		expect(row).toMatchObject({
+			title: 'standup',
+			repeatRule: { freq: 'weekly', weekdays: [1, 4] }
+		});
+		expect(row.dueDate).toBeTruthy();
+		expect(row.seriesId).toBeTruthy();
+	});
+
+	it('toggleTask returns the next date, and a repeated submit is a harmless no-op', async () => {
+		const r = await add({ title: 'plants every 3 days' });
+		const id = r.task!.id;
+		const first = (await taskActions.toggleTask(ev({ id, completed: 'true' }))) as {
+			completed: { next: { dueDate: string } | null };
+		};
+		expect(first.completed.next?.dueDate).toBeTruthy();
+		const again = await taskActions.toggleTask(ev({ id, completed: 'true' }));
+		expect(again).toEqual({ completed: { next: null, capped: false } });
+		const series = await db.query.tasks.findMany({ where: (t, { eq }) => eq(t.title, 'plants') });
+		expect(series).toHaveLength(2);
+		// undo: the untouched next occurrence goes away
+		await taskActions.toggleTask(ev({ id, completed: 'false' }));
+		const live = (
+			await db.query.tasks.findMany({ where: (t, { eq }) => eq(t.title, 'plants') })
+		).filter((t) => !t.deletedAt && !t.completedAt);
+		expect(live.map((t) => t.id)).toEqual([id]);
+	});
+
+	it('the panel sets a repeat (moving the due date onto it) and ends it', async () => {
+		const r = await add({ title: 'plain task' });
+		const id = r.task!.id;
+		const save = (fields: Record<string, string | string[]>) =>
+			taskActions.saveTask(ev({ id, title: 'plain task', notes: '', repeatField: '1', ...fields }));
+		await save({ dueDate: '2030-01-02', repeat: 'weekly', interval: '1', weekday: ['1', '4'] }); // a Wednesday
+		let [row] = await db.query.tasks.findMany({ where: (t, { eq }) => eq(t.id, id) });
+		expect(row).toMatchObject({
+			dueDate: '2030-01-03',
+			repeatRule: { freq: 'weekly', weekdays: [1, 4] }
+		});
+		await save({ dueDate: '2030-01-03', repeat: 'none' });
+		[row] = await db.query.tasks.findMany({ where: (t, { eq }) => eq(t.id, id) });
+		expect(row).toMatchObject({ dueDate: '2030-01-03', repeatRule: null });
+	});
+
+	it('the panel rejects an invalid repeat with 400', async () => {
+		const r = await add({ title: 'x' });
+		const res: unknown = await taskActions.saveTask(
+			ev({
+				id: r.task!.id,
+				title: 'x',
+				repeatField: '1',
+				repeat: 'daily',
+				interval: '0'
+			})
+		);
+		expect(isActionFailure(res) && res.status).toBe(400);
 	});
 });

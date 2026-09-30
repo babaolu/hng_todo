@@ -10,6 +10,7 @@ import {
 	uniqueIndex,
 	uuid
 } from 'drizzle-orm/pg-core';
+import { parseRule, type RepeatRule } from '../../repeat';
 
 /**
  * Fractional-index keys must sort byte-wise, which the database's default
@@ -17,6 +18,23 @@ import {
  * agree with JavaScript string comparison.
  */
 const orderKey = customType<{ data: string }>({ dataType: () => 'text collate "C"' });
+
+/**
+ * A recurring task's rule as jsonb. Every value read or written goes through
+ * parseRule (src/lib/repeat.ts): an invalid stored rule reads as "not recurring",
+ * and writing an invalid one throws.
+ */
+const repeatRuleColumn = customType<{ data: RepeatRule; driverData: unknown }>({
+	dataType: () => 'jsonb',
+	toDriver(value) {
+		const rule = parseRule(value);
+		if (!rule) throw new Error('Invalid repeat rule');
+		return JSON.stringify(rule);
+	},
+	fromDriver(value) {
+		return parseRule(value) as RepeatRule;
+	}
+});
 
 const timestamps = {
 	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -118,6 +136,10 @@ export const tasks = pgTable(
 		// A calendar day ('YYYY-MM-DD'), not an instant: string mode so no JS Date shifts it.
 		dueDate: date('due_date', { mode: 'string' }),
 		pinnedToday: boolean('pinned_today').notNull().default(false),
+		/** Recurring tasks: the rule (always with a due date), shared series id, and the occurrence this one was generated from. */
+		repeatRule: repeatRuleColumn('repeat_rule'),
+		seriesId: uuid('series_id'),
+		previousId: uuid('previous_id'),
 		order: orderKey('order').notNull(),
 		...timestamps,
 		deletedAt: timestamp('deleted_at', { withTimezone: true })
@@ -132,7 +154,11 @@ export const tasks = pgTable(
 		// Today and Upcoming: active tasks by due date.
 		index('tasks_user_due_idx')
 			.on(t.userId, t.dueDate)
-			.where(sql`${t.deletedAt} is null and ${t.completedAt} is null`)
+			.where(sql`${t.deletedAt} is null and ${t.completedAt} is null`),
+		// Undo of a completion finds the occurrence generated from it.
+		index('tasks_previous_idx')
+			.on(t.previousId)
+			.where(sql`${t.previousId} is not null`)
 	]
 );
 

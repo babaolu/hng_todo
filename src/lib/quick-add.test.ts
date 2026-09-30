@@ -246,3 +246,121 @@ describe('#list', () => {
 		expect(parse('#work')).toMatchObject({ title: '#work', listId: 'work' });
 	});
 });
+
+describe('repeats (at the end of the text only)', () => {
+	// TODAY is Thu 1 Oct 2026.
+	it.each([
+		// [input, title, wording, first due]
+		['task daily', 'task', 'Every day', '2026-10-01'],
+		['task every day', 'task', 'Every day', '2026-10-01'],
+		['task weekdays', 'task', 'Weekdays', '2026-10-01'],
+		['task every weekday', 'task', 'Weekdays', '2026-10-01'],
+		['task every mon', 'task', 'Every Mon', '2026-10-05'],
+		['task every monday', 'task', 'Every Mon', '2026-10-05'],
+		['task every mon and thu', 'task', 'Every Mon & Thu', '2026-10-01'],
+		['task every monday, thursday', 'task', 'Every Mon & Thu', '2026-10-01'],
+		['task every sat & sun', 'task', 'Every Sat & Sun', '2026-10-03'],
+		['task weekly', 'task', 'Every Thu', '2026-10-01'], // anchored to the first due date
+		['task every week', 'task', 'Every Thu', '2026-10-01'],
+		['task every 2 weeks', 'task', 'Every 2 weeks on Thu', '2026-10-01'],
+		['task every 2 weeks on fri', 'task', 'Every 2 weeks on Fri', '2026-10-02'],
+		['task every 3 days', 'task', 'Every 3 days', '2026-10-01'],
+		['task monthly', 'task', 'Monthly on the 1st', '2026-10-01'],
+		['task every month', 'task', 'Monthly on the 1st', '2026-10-01'],
+		['task every month on the 15th', 'task', 'Monthly on the 15th', '2026-10-15'],
+		['task monthly on the 1st', 'task', 'Monthly on the 1st', '2026-10-01'],
+		['task monthly on the 31st', 'task', 'Monthly on the 31st', '2026-10-31'],
+		['task monthly on the last day', 'task', 'Monthly on the last day', '2026-10-31'],
+		['task every 3 months', 'task', 'Every 3 months on the 1st', '2026-10-01'],
+		['task yearly', 'task', 'Every year on 1 Oct', '2026-10-01'],
+		['task every year', 'task', 'Every year on 1 Oct', '2026-10-01'],
+		['task annually', 'task', 'Every year on 1 Oct', '2026-10-01'],
+		// the brief's must-repeat examples
+		['standup daily', 'standup', 'Every day', '2026-10-01'],
+		['water plants every 3 days', 'water plants', 'Every 3 days', '2026-10-01'],
+		['pay rent monthly on the 1st', 'pay rent', 'Monthly on the 1st', '2026-10-01'],
+		['review budget weekly', 'review budget', 'Every Thu', '2026-10-01'],
+		['standup daily.', 'standup', 'Every day', '2026-10-01'] // trailing punctuation
+	])('%s', (input, title, wording, dueDate) => {
+		expect(parse(input)).toMatchObject({ title, repeatText: wording, dueDate });
+	});
+
+	it('works before #tags', () => {
+		expect(parse('gym every mon and thu #work')).toMatchObject({
+			title: 'gym',
+			listId: 'work',
+			repeatText: 'Every Mon & Thu',
+			dueDate: '2026-10-01'
+		});
+		// an unknown tag stays in the title; the repeat is still found
+		expect(parse('gym every mon and thu #health')).toMatchObject({
+			title: 'gym #health',
+			repeatText: 'Every Mon & Thu'
+		});
+	});
+
+	it('starts from an explicit date, which also anchors "weekly" / "monthly"', () => {
+		expect(parse('pay rent 15/10 monthly')).toMatchObject({
+			title: 'pay rent',
+			repeatText: 'Monthly on the 15th',
+			dueDate: '2026-10-15'
+		});
+		expect(parse('gym fri weekly')).toMatchObject({
+			title: 'gym',
+			repeatText: 'Every Fri',
+			dueDate: '2026-10-02'
+		});
+		expect(parse('sync next tue every week')).toMatchObject({
+			title: 'sync',
+			repeatText: 'Every Tue',
+			dueDate: '2026-10-06'
+		});
+		// explicit weekdays: the first matching day on or after the date
+		expect(parse('gym next wed every mon and thu')).toMatchObject({ dueDate: '2026-10-08' });
+	});
+
+	it('stores the anchor and specifics in the rule', () => {
+		expect(parse('task every 2 weeks on fri').repeat).toEqual({
+			freq: 'weekly',
+			interval: 2,
+			weekdays: [5],
+			anchor: '2026-10-01'
+		});
+		expect(parse('task monthly on the last day').repeat).toEqual({
+			freq: 'monthly',
+			interval: 1,
+			monthDay: -1,
+			anchor: '2026-10-01'
+		});
+	});
+
+	it('a picked date moves the first occurrence and keeps the rule', () => {
+		const picked = (text: string, pickedDate: string) =>
+			parseQuickAdd(text, { today: TODAY, lists, pickedDate });
+		expect(picked('gym every mon', '2026-10-14')).toMatchObject({
+			repeatText: 'Every Mon',
+			dueDate: '2026-10-19'
+		});
+		expect(picked('pay rent monthly', '2026-10-20')).toMatchObject({
+			repeatText: 'Monthly on the 20th',
+			dueDate: '2026-10-20'
+		});
+		expect(picked('dentist tomorrow', '2026-11-03')).toMatchObject({
+			title: 'dentist',
+			dueDate: '2026-11-03',
+			repeat: null
+		});
+	});
+
+	it.each([
+		'read every chapter',
+		'check every page',
+		'review the weekly report',
+		'print monthly statement',
+		'daily standup notes doc',
+		'every day is a gift, write it down',
+		'task every 0 days'
+	])('%s does not repeat', (input) => {
+		expect(parse(input)).toMatchObject({ title: input, repeat: null, repeatText: null });
+	});
+});

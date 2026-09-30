@@ -6,6 +6,7 @@
  */
 import { asc, eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import type { RepeatRule } from '$lib/repeat';
 import { createAuthStore } from './auth';
 import { lists, tasks, users } from './db/schema';
 import type { Db } from './db/types';
@@ -21,6 +22,7 @@ let listStore: ReturnType<typeof createListStore>;
 
 const TODAY = '2026-10-01';
 const TOMORROW = '2026-10-02';
+const EVERY_DAY: RepeatRule = { freq: 'daily', interval: 1, anchor: TODAY };
 
 type Attacker = { id: string; list: string; task: string; inboxTask: string };
 type Victim = {
@@ -32,6 +34,7 @@ type Victim = {
 	inboxTask: string;
 	doneTask: string;
 	deletedTask: string;
+	recurring: string;
 };
 const attackers = {} as Record<'real' | 'guest', Attacker>;
 const victims = {} as Record<'real' | 'guest', Victim>;
@@ -74,7 +77,13 @@ async function seedVictim(id: string): Promise<Victim> {
 	await taskStore.setDueDate(id, task, TODAY);
 	await taskStore.setPinned(id, secondTask, true);
 	await taskStore.setDueDate(id, inboxTask, TOMORROW);
-	return { id, list, otherList, task, secondTask, inboxTask, doneTask, deletedTask };
+	const recurring = (await taskStore.create(id, {
+		title: 'B recurring',
+		listId: list,
+		dueDate: TODAY,
+		repeatRule: EVERY_DAY
+	}))!.id;
+	return { id, list, otherList, task, secondTask, inboxTask, doneTask, deletedTask, recurring };
 }
 
 beforeAll(async () => {
@@ -111,7 +120,14 @@ describe.each([
 		a = A.id;
 		B = victims[victimKey];
 	});
-	const bTaskIds = () => [B.task, B.secondTask, B.inboxTask, B.doneTask, B.deletedTask];
+	const bTaskIds = () => [
+		B.task,
+		B.secondTask,
+		B.inboxTask,
+		B.doneTask,
+		B.deletedTask,
+		B.recurring
+	];
 	const bListIds = () => [B.list, B.otherList];
 
 	describe('tasks', () => {
@@ -184,7 +200,7 @@ describe.each([
 			expect(await taskStore.restore(a, B.deletedTask)).toBeNull();
 		});
 
-		it('listToday never returns B tasks, due or pinned', async () => {
+		it('listToday never returns B tasks, due, pinned or recurring', async () => {
 			expect((await taskStore.listToday(a, TODAY)).map((t) => t.id)).toEqual([A.task]);
 		});
 
@@ -219,6 +235,35 @@ describe.each([
 		it('create with a due date still refuses B lists', async () => {
 			expect(
 				await taskStore.create(a, { title: 'sneaky', listId: B.list, dueDate: TODAY })
+			).toBeNull();
+		});
+
+		it('complete cannot complete B tasks or generate occurrences for anyone', async () => {
+			const own = async () => (await db.select().from(tasks).where(eq(tasks.userId, a))).length;
+			const before = await own();
+			for (const id of bTaskIds()) expect(await taskStore.complete(a, id, TODAY)).toBeNull();
+			expect(await own()).toBe(before);
+		});
+
+		it('uncomplete cannot reopen B tasks or touch their occurrences', async () => {
+			for (const id of bTaskIds()) expect(await taskStore.uncomplete(a, id)).toBeNull();
+		});
+
+		it('setRepeat cannot set or end repeats on B tasks', async () => {
+			for (const id of bTaskIds()) {
+				expect(await taskStore.setRepeat(a, id, EVERY_DAY, TODAY)).toBeNull();
+				expect(await taskStore.setRepeat(a, id, null, TODAY)).toBeNull();
+			}
+		});
+
+		it('create with a repeat still refuses B lists', async () => {
+			expect(
+				await taskStore.create(a, {
+					title: 'sneaky',
+					listId: B.list,
+					dueDate: TODAY,
+					repeatRule: EVERY_DAY
+				})
 			).toBeNull();
 		});
 

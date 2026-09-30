@@ -69,6 +69,7 @@
 	[type='email'],
 	[type='password'],
 	[type='date'],
+	[type='number'],
 	textarea,
 	select {
 		@apply rounded-md border-line bg-surface text-ink placeholder:text-muted focus:border-accent focus:ring-accent;

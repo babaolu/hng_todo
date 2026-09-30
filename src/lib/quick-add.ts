@@ -3,13 +3,27 @@
  * due Friday, list Home. Pure and shared: the client runs it for the live
  * preview, and the server re-runs it on the raw text as the source of truth.
  *
+ * A repeat ("every mon and thu", "monthly on the 1st") is recognised only at the
+ * end of the text (see REPEAT_PATTERNS), so "review the weekly report" stays text.
+ *
  * Dates come from three sources, and the last date in the text wins:
  * 1. "next <weekday>" phrases (own rule, below),
  * 2. slash dates like 3/10 (own rule, below),
  * 3. everything else via chrono-node ("tomorrow", "sep 12", "in 3 days", "fri").
+ *
+ * With a repeat, the due date is the rule's first occurrence on or after the date
+ * (or today), and "weekly", "monthly" and "yearly" take their day from it.
  */
 import * as chrono from 'chrono-node/en';
 import { addDays, fromParts, isDateString, weekdayOf } from './dates';
+import {
+	anchorRule,
+	describe,
+	firstOccurrence,
+	LAST_DAY,
+	type Freq,
+	type RepeatRule
+} from './repeat';
 
 export type QuickAddList = { id: string; name: string; archived?: boolean };
 
@@ -24,6 +38,10 @@ export type QuickAdd = {
 	dateText: string | null;
 	listId: string | null;
 	listName: string | null;
+	/** A repeat found at the end of the text, anchored to the due date. */
+	repeat: RepeatRule | null;
+	/** Its wording for the chip, e.g. "Every Mon & Thu". */
+	repeatText: string | null;
 };
 
 type Span = { start: number; end: number };
@@ -50,6 +68,70 @@ const FULL_WEEKDAYS = [
 	'friday',
 	'saturday'
 ];
+
+const WEEKDAY_LIST = `${WEEKDAY}(?:\\s*(?:,|&|\\band\\b)\\s*${WEEKDAY})*`;
+const MONTH_DAY = '(last\\s+day|\\d{1,2})(?:st|nd|rd|th)?';
+
+type PartialRule = { freq: Freq; interval: number; weekdays?: number[]; monthDay?: number };
+
+const isoDays = (list: string) =>
+	[...list.matchAll(new RegExp(WEEKDAY, 'gi'))].map((m) => ((dayIndex(m[1]) + 6) % 7) + 1);
+const monthDay = (text?: string) =>
+	text === undefined ? undefined : /^last/i.test(text) ? LAST_DAY : Number(text);
+const every = (n?: string) => (n === undefined ? 1 : Number(n));
+
+/**
+ * Repeats, matched only at the end of the text (after #tags and trailing
+ * punctuation are set aside). Longer forms first.
+ */
+const REPEAT_PATTERNS: [RegExp, (m: RegExpMatchArray) => PartialRule][] = [
+	[
+		new RegExp(`\\bevery\\s+(\\d{1,2})\\s+weeks?\\s+on\\s+(${WEEKDAY_LIST})$`, 'i'),
+		(m) => ({ freq: 'weekly', interval: every(m[1]), weekdays: isoDays(m[2]) })
+	],
+	[
+		new RegExp(`\\bevery\\s+(${WEEKDAY_LIST})$`, 'i'),
+		(m) => ({ freq: 'weekly', interval: 1, weekdays: isoDays(m[1]) })
+	],
+	[
+		/\b(?:every\s+weekday|weekdays)$/i,
+		() => ({ freq: 'weekly', interval: 1, weekdays: [1, 2, 3, 4, 5] })
+	],
+	[/\b(?:every\s+day|daily)$/i, () => ({ freq: 'daily', interval: 1 })],
+	[/\bevery\s+(\d{1,2})\s+days$/i, (m) => ({ freq: 'daily', interval: every(m[1]) })],
+	[/\bevery\s+(\d{1,2})\s+weeks$/i, (m) => ({ freq: 'weekly', interval: every(m[1]) })],
+	[/\b(?:weekly|every\s+week)$/i, () => ({ freq: 'weekly', interval: 1 })],
+	[
+		new RegExp(`\\bevery\\s+(\\d{1,2})\\s+months(?:\\s+on\\s+the\\s+${MONTH_DAY})?$`, 'i'),
+		(m) => ({ freq: 'monthly', interval: every(m[1]), monthDay: monthDay(m[2]) })
+	],
+	[
+		new RegExp(`\\b(?:monthly|every\\s+month)(?:\\s+on\\s+the\\s+${MONTH_DAY})?$`, 'i'),
+		(m) => ({ freq: 'monthly', interval: 1, monthDay: monthDay(m[1]) })
+	],
+	[/\bevery\s+(\d{1,2})\s+years$/i, (m) => ({ freq: 'yearly', interval: every(m[1]) })],
+	[/\b(?:yearly|annually|every\s+year)$/i, () => ({ freq: 'yearly', interval: 1 })]
+];
+
+/** A repeat phrase at the end of the (tag-masked) text, if any. */
+function findRepeat(masked: string): (Span & { rule: PartialRule }) | null {
+	const end = masked.replace(/[\s.,;:!?]+$/, '').length;
+	const head = masked.slice(0, end);
+	for (const [pattern, build] of REPEAT_PATTERNS) {
+		const m = pattern.exec(head);
+		if (!m) continue;
+		const rule = build(m);
+		if (rule.interval < 1) return null;
+		if (
+			rule.monthDay !== undefined &&
+			rule.monthDay !== LAST_DAY &&
+			!(rule.monthDay >= 1 && rule.monthDay <= 31)
+		)
+			return null;
+		return { start: m.index, end, rule };
+	}
+	return null;
+}
 
 /**
  * "next tue", "next week tue", "tue next week" (optionally with "on"): that
@@ -109,8 +191,15 @@ export function parseQuickAdd(
 	{
 		today,
 		lists,
-		dateOrder = 'dmy'
-	}: { today: string; lists: QuickAddList[]; dateOrder?: DateOrder }
+		dateOrder = 'dmy',
+		pickedDate
+	}: {
+		today: string;
+		lists: QuickAddList[];
+		dateOrder?: DateOrder;
+		/** A date chosen in the date chip's picker: it replaces the parsed date (or start of a repeat). */
+		pickedDate?: string | null;
+	}
 ): QuickAdd {
 	// 1. #tags. The last one naming an active list wins; unmatched tags stay as typed.
 	const byName = new Map<string, QuickAddList>();
@@ -125,14 +214,29 @@ export function parseQuickAdd(
 	}
 	const tag = tags.findLast((t) => t.list);
 
-	// 2. Dates, with every tag blanked out so "#friday-party" is never a date.
+	// 2. A repeat at the end, with every tag blanked out ("gym every mon #health").
 	let masked = text;
 	for (const t of tags) masked = blank(masked, t);
+	const repeat = findRepeat(masked);
+	if (repeat) masked = blank(masked, repeat);
+
+	// 3. Dates ("#friday-party" and the repeat phrase are blanked out).
 	const date = findDate(masked, today, dateOrder);
 
-	// 3. Title: remove the date phrase and the matched tag.
+	// A picked date wins; a repeat starts from the date (or today) and is anchored to it.
+	const start = pickedDate ?? date?.dueDate ?? null;
+	let rule: RepeatRule | null = null;
+	let dueDate = start;
+	if (repeat) {
+		const from = start ?? today;
+		rule = anchorRule(repeat.rule, from);
+		dueDate = firstOccurrence(rule, from);
+	}
+
+	// 4. Title: remove the date phrase, the repeat and the matched tag.
 	const remove: Span[] = [];
 	if (date) remove.push(date);
+	if (repeat) remove.push(repeat);
 	if (tag) remove.push(tag);
 	let title = text;
 	for (const span of remove.sort((a, b) => b.start - a.start)) {
@@ -145,10 +249,12 @@ export function parseQuickAdd(
 
 	return {
 		title,
-		dueDate: date?.dueDate ?? null,
+		dueDate,
 		dateText: date?.text ?? null,
 		listId: tag?.list?.id ?? null,
-		listName: tag?.list?.name ?? null
+		listName: tag?.list?.name ?? null,
+		repeat: rule,
+		repeatText: rule ? describe(rule) : null
 	};
 }
 
@@ -261,6 +367,8 @@ function resolve(result: chrono.ParsedResult, masked: string, today: string): st
 	// Time-only ("at 5") and month-only ("May", "march") matches carry no day.
 	if (!start.isCertain('day') && !start.isCertain('weekday')) return null;
 	if (lower === 'now' || lower === 'right now') return null;
+	// "0 days", "in 0 weeks": a zero offset is never a meaningful date.
+	if (/^(?:in\s+)?0+\s/.test(lower)) return null;
 	if (CHRONO_NUMERIC.test(text)) return null;
 	if (/\b(last|past|previous|ago)\b/i.test(lower)) return null;
 

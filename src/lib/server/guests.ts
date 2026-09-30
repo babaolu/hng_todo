@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, count, eq, gt, lte } from 'drizzle-orm';
 import { addDays, todayIn } from '../dates';
+import type { RepeatRule } from '../repeat';
 import { createAuthStore, GUEST_TTL } from './auth';
 import { users } from './db/schema';
 import type { Db } from './db/types';
@@ -73,9 +74,14 @@ export function createGuestStore(
 			title: string,
 			dueDate: string | null,
 			listId: string | null,
-			extra: { notes?: string; pinned?: boolean; done?: boolean } = {}
+			extra: { notes?: string; pinned?: boolean; done?: boolean; repeat?: RepeatRule } = {}
 		) => {
-			const task = (await taskStore.create(userId, { title, listId, dueDate }))!;
+			const task = (await taskStore.create(userId, {
+				title,
+				listId,
+				dueDate,
+				repeatRule: extra.repeat ?? null
+			}))!;
 			if (extra.notes) await taskStore.update(userId, task.id, { notes: extra.notes });
 			if (extra.pinned) await taskStore.setPinned(userId, task.id, true);
 			if (extra.done) await taskStore.setCompleted(userId, task.id, true);
@@ -84,6 +90,9 @@ export function createGuestStore(
 		// Created last-first: new tasks go to the top of their list.
 		await add('Set up a guest account', d(-1), null, { done: true });
 		await add('Ideas for the weekend', null, null);
+		await add('Water the plants', today, home.id, {
+			repeat: { freq: 'daily', interval: 3, anchor: today }
+		});
 		await add('Team retro', d(7), work.id);
 		await add('Dentist appointment', d(1), null);
 		await add('Plan the week', today, work.id);
@@ -96,6 +105,7 @@ export function createGuestStore(
 				'',
 				'• Dates: “tomorrow”, “fri”, “next tue”, “in 3 days”, “15/10” (day/month)',
 				'• Lists: “#home” or “#work” puts the task in that list',
+				'• Repeats, at the end: “daily”, “every mon and thu”, “every 3 days”, “monthly on the 1st”. Completing a repeating task schedules the next one.',
 				'',
 				'Try “pay rent 15/10 #home”. Click the date chip to pick another date, or ✕ to keep the text exactly as typed.',
 				'',

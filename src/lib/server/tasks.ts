@@ -14,7 +14,9 @@ import {
 	or,
 	sql
 } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { isDateString } from '../dates';
+import { firstOccurrence, nextAfterCompletion, parseRule, type RepeatRule } from '../repeat';
 import { lists, tasks, type Task } from './db/schema';
 import type { Db } from './db/types';
 import { generateKeyBetween, keyBetween } from './ordering';
@@ -137,13 +139,23 @@ export function createTaskStore(db: Db) {
 			return row?.n ?? 0;
 		},
 
-		/** New tasks go to the top of their list. Returns null if the list isn't the user's. */
+		/**
+		 * New tasks go to the top of their list. Returns null if the list isn't the
+		 * user's, or the input is invalid (a recurring task needs a due date).
+		 */
 		async create(
 			userId: string,
-			input: { title: string; listId: ListId; dueDate?: string | null }
+			input: {
+				title: string;
+				listId: ListId;
+				dueDate?: string | null;
+				repeatRule?: RepeatRule | null;
+			}
 		) {
 			if (!(await ownsList(userId, input.listId))) return null;
 			if (input.dueDate != null && !isDateString(input.dueDate)) return null;
+			const rule = input.repeatRule ? parseRule(input.repeatRule) : null;
+			if (input.repeatRule && (!rule || !input.dueDate)) return null;
 			const [row] = await db
 				.insert(tasks)
 				.values({
@@ -151,6 +163,8 @@ export function createTaskStore(db: Db) {
 					listId: input.listId,
 					title: input.title,
 					dueDate: input.dueDate ?? null,
+					repeatRule: rule,
+					seriesId: rule ? randomUUID() : null,
 					order: await topKey(userId, input.listId)
 				})
 				.returning();
@@ -183,6 +197,107 @@ export function createTaskStore(db: Db) {
 
 		setCompleted(userId: string, id: string, completed: boolean) {
 			return update(userId, id, { completedAt: completed ? new Date() : null });
+		},
+
+		/**
+		 * Set a repeat (the due date moves onto the rule: the first occurrence on or
+		 * after the current due date, or today when there is none) or end one (null).
+		 */
+		async setRepeat(userId: string, id: string, rule: RepeatRule | null, today: string) {
+			const task = await get(userId, id);
+			if (!task) return null;
+			if (!rule) return update(userId, id, { repeatRule: null });
+			const valid = parseRule(rule);
+			if (!valid) return null;
+			return update(userId, id, {
+				repeatRule: valid,
+				seriesId: task.seriesId ?? randomUUID(),
+				dueDate: firstOccurrence(valid, task.dueDate ?? today)
+			});
+		},
+
+		/**
+		 * Complete a task. For a recurring task this also creates the next
+		 * occurrence, in the same statement: the insert only happens if the update
+		 * matched an open task, so a double submit can never create two. The copy
+		 * takes user_id and everything else from the matched row, never from input.
+		 * `allowNext: false` (the guest cap) completes without creating the next one.
+		 */
+		async complete(
+			userId: string,
+			id: string,
+			today: string,
+			{ allowNext = true, now = new Date() }: { allowNext?: boolean; now?: Date } = {}
+		) {
+			const task = await get(userId, id);
+			if (!task || task.completedAt) return null;
+			const rule = task.repeatRule;
+			const nextDue = rule && task.dueDate ? nextAfterCompletion(rule, task.dueDate, today) : null;
+			const createNext = !!nextDue && allowNext;
+			const order = createNext ? await topKey(userId, task.listId) : null;
+			const at = now.toISOString();
+
+			const result = await db.execute<{ done_id: string | null; next_id: string | null }>(sql`
+				with done as (
+					update ${tasks}
+					set completed_at = ${at}::timestamptz, updated_at = ${at}::timestamptz
+					where id = ${id} and user_id = ${userId} and completed_at is null and deleted_at is null
+					returning *
+				), next as (
+					insert into ${tasks} (user_id, list_id, title, notes, due_date, repeat_rule, series_id,
+						previous_id, "order", pinned_today, created_at, updated_at)
+					select user_id, list_id, title, notes, ${nextDue}::date, repeat_rule, series_id,
+						id, ${order}, false, ${at}::timestamptz, ${at}::timestamptz
+					from done
+					where ${createNext}::boolean and repeat_rule is not null
+					returning id
+				)
+				select (select id from done) as done_id, (select id from next) as next_id
+			`);
+			const [row] = (
+				result as unknown as { rows: { done_id: string | null; next_id: string | null }[] }
+			).rows;
+			if (!row?.done_id) return null;
+			return {
+				task: (await db.select().from(tasks).where(eq(tasks.id, row.done_id)))[0],
+				next: row.next_id ? await get(userId, row.next_id) : null,
+				/** A recurring task completed without its next occurrence (guest cap). */
+				nextBlocked: !!nextDue && !allowNext
+			};
+		},
+
+		/**
+		 * Undo a completion. If the occurrence generated from this one is untouched
+		 * (never edited, moved, completed or deleted), it is soft-deleted and this one
+		 * is the live occurrence again. If it was touched, it stays and this one
+		 * loses its repeat, so a series never has two live occurrences. One statement.
+		 */
+		async uncomplete(userId: string, id: string, { now = new Date() }: { now?: Date } = {}) {
+			const at = now.toISOString();
+			const result = await db.execute<{ id: string | null }>(sql`
+				with target as (
+					select id from ${tasks}
+					where id = ${id} and user_id = ${userId} and completed_at is not null and deleted_at is null
+				), generated as (
+					select id, (completed_at is null and deleted_at is null and updated_at = created_at) as untouched
+					from ${tasks}
+					where previous_id in (select id from target) and user_id = ${userId}
+				), dropped as (
+					update ${tasks} set deleted_at = ${at}::timestamptz
+					where id in (select id from generated where untouched)
+					returning id
+				), restored as (
+					update ${tasks}
+					set completed_at = null, updated_at = ${at}::timestamptz,
+						repeat_rule = case when exists (select 1 from generated where not untouched)
+							then null else repeat_rule end
+					where id in (select id from target)
+					returning id
+				)
+				select (select id from restored) as id
+			`);
+			const [row] = (result as unknown as { rows: { id: string | null }[] }).rows;
+			return row?.id ? get(userId, row.id) : null;
 		},
 
 		/** Move to another list (or the Inbox), placing the task at the top. */

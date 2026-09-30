@@ -7,6 +7,7 @@
 	import { dndzone, setKeyboardDragTrigger, type DndEvent } from 'svelte-dnd-action';
 	import { failureMessage, isTemp, isTyping, neighbours, postAction } from '$lib/actions';
 	import { daysBetween, dueLabel, formatDay } from '$lib/dates';
+	import { describe } from '$lib/repeat';
 	import { toasts } from '$lib/toasts.svelte';
 	import type { List, Task } from '$lib/types';
 	import QuickAdd, { type Added } from './QuickAdd.svelte';
@@ -120,7 +121,7 @@
 		items = items.map((t) => (t.id === id ? { ...t, ...changes } : t));
 	}
 
-	function addOptimistic(fields: Pick<Task, 'title' | 'listId' | 'dueDate'>) {
+	function addOptimistic(fields: Pick<Task, 'title' | 'listId' | 'dueDate' | 'repeatRule'>) {
 		const now = new Date();
 		const temp: Task = {
 			id: `temp-${crypto.randomUUID()}`,
@@ -128,6 +129,8 @@
 			notes: null,
 			completedAt: null,
 			pinnedToday: false,
+			seriesId: null,
+			previousId: null,
 			order: '',
 			createdAt: now,
 			updatedAt: now,
@@ -249,7 +252,16 @@
 			return async ({ result, update }) => {
 				await update();
 				if (result.type !== 'success') return toasts.show(failureMessage(result));
-				toasts.show(completing ? `Completed “${title}”` : `Moved “${title}” back`, {
+				const outcome = result.data?.completed as
+					{ next: { dueDate: string | null } | null; capped: boolean } | undefined;
+				const message = !completing
+					? `Moved “${title}” back`
+					: outcome?.next?.dueDate
+						? `Done. Next: ${formatDay(outcome.next.dueDate, today)}`
+						: outcome?.capped
+							? `Done. The next “${title}” wasn't created: guest accounts can hold up to 200 tasks.`
+							: `Completed “${title}”`;
+				toasts.show(message, {
 					label: 'Undo',
 					run: () => postAction('toggleTask', { id, completed: String(!completing) })
 				});
@@ -286,6 +298,12 @@
 			{/if}
 			{#if (mode === 'today' || mode === 'upcoming') && task.listId && listName.has(task.listId)}
 				<span class="hidden max-w-28 truncate sm:inline">{listName.get(task.listId)}</span>
+			{/if}
+			{#if task.repeatRule}
+				{@const repeats = describe(task.repeatRule)}
+				<span title="Repeats: {repeats}" aria-label="Repeats: {repeats}">
+					↻<span class="hidden sm:inline"> {repeats}</span>
+				</span>
 			{/if}
 			{#if due}
 				<span class={due.overdue && !done ? 'italic' : ''}>{due.text}</span>
@@ -401,12 +419,14 @@
 </div>
 
 {#if openTask}
-	<TaskPanel
-		task={openTask}
-		{lists}
-		reorderable={reorderable && !openTask.completedAt}
-		onclose={close}
-		onsave={save}
-		ondelete={remove}
-	/>
+	{#key openTask.id}
+		<TaskPanel
+			task={openTask}
+			{lists}
+			reorderable={reorderable && !openTask.completedAt}
+			onclose={close}
+			onsave={save}
+			ondelete={remove}
+		/>
+	{/key}
 {/if}

@@ -1,4 +1,5 @@
 <script lang="ts" module>
+	import type { RepeatRule } from '$lib/repeat';
 	export type Added = { id: string; title: string; listId: string | null; dueDate: string | null };
 </script>
 
@@ -20,7 +21,12 @@
 		view: 'today' | 'upcoming' | 'list';
 		placeholder: string;
 		/** Show the new task immediately; the refresh after saving replaces it. */
-		onadd?: (task: { title: string; listId: string | null; dueDate: string | null }) => void;
+		onadd?: (task: {
+			title: string;
+			listId: string | null;
+			dueDate: string | null;
+			repeatRule: RepeatRule | null;
+		}) => void;
 		/** Called with the saved task, e.g. to say where it went. */
 		onadded?: (task: Added) => void;
 	};
@@ -42,12 +48,15 @@
 		dateOrder = navigator.language.toLowerCase() === 'en-us' ? 'mdy' : 'dmy';
 	});
 
-	// Preview only: the server re-parses the raw text itself.
-	const preview = (text: string) => parseQuickAdd(text, { today, lists, dateOrder });
-	const parsed = $derived(parsing && value.trim() ? preview(value) : null);
-	const showChips = $derived(!!(parsed?.dueDate || parsed?.listName));
-	/** What the date chip shows and what gets saved: the picked date, else the parsed one. */
-	const due = $derived(parsed?.dueDate ? (picked ?? parsed.dueDate) : null);
+	// Preview only: the server re-parses the raw text itself (with the same picked date).
+	const preview = (text: string, pickedDate?: string | null) =>
+		parseQuickAdd(text, { today, lists, dateOrder, pickedDate });
+	/** What the text says on its own: decides which chips exist. */
+	const base = $derived(parsing && value.trim() ? preview(value) : null);
+	/** With a picked date applied: what gets shown and saved. */
+	const parsed = $derived(base && base.dueDate && picked ? preview(value, picked) : base);
+	const showChips = $derived(!!(base?.dueDate || base?.listName || base?.repeat));
+	const due = $derived(base?.dueDate ? parsed!.dueDate : null);
 
 	/** "Tomorrow, Thu 1 Oct", or just "Tue 6 Oct" when the relative label is the date. */
 	function spoken(date: string) {
@@ -90,11 +99,12 @@
 	use:enhance={({ formData, cancel }) => {
 		const raw = String(formData.get('title') ?? '').trim();
 		if (!raw) return cancel();
-		const result = parsing ? preview(raw) : null;
+		const result = parsing ? preview(raw, base?.dueDate ? picked : null) : null;
 		onadd?.({
 			title: result?.title ?? raw,
 			listId: result?.listId ?? listId,
-			dueDate: (result?.dueDate && picked) || result?.dueDate || (view === 'today' ? today : null)
+			dueDate: result?.dueDate || (view === 'today' ? today : null),
+			repeatRule: result?.repeat ?? null
 		});
 		value = '';
 		parsing = true;
@@ -168,6 +178,20 @@
 						type="button"
 						class="rounded-full px-1.5 text-muted hover:bg-raised hover:text-ink"
 						aria-label="Remove the date and keep “{parsed.dateText}” as text"
+						onclick={literal}>✕</button
+					>
+				</span>
+			{/if}
+			{#if parsed.repeatText}
+				<span
+					class="mt-2 inline-flex items-center gap-1 rounded-full bg-accent-soft py-0.5 pr-1 pl-2.5"
+				>
+					<span aria-hidden="true">↻</span>
+					<span>{parsed.repeatText}</span>
+					<button
+						type="button"
+						class="rounded-full px-1.5 text-muted hover:bg-raised hover:text-ink"
+						aria-label="Don't repeat: keep the text as typed"
 						onclick={literal}>✕</button
 					>
 				</span>

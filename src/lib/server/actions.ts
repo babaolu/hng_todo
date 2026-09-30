@@ -1,6 +1,7 @@
 import { error, fail, redirect, type RequestEvent } from '@sveltejs/kit';
 import { isDateString, todayIn } from '$lib/dates';
 import { parseQuickAdd, type DateOrder } from '$lib/quick-add';
+import { ruleFromFields, type RepeatRule } from '$lib/repeat';
 import { data } from './data';
 import { GUEST_LIMITS } from './guests';
 
@@ -75,6 +76,7 @@ export const taskActions = {
 		let listId = optionalId(form, 'listId');
 		// Only the Today view adds a default date; Upcoming, Inbox and lists add none.
 		let dueDate = text(form, 'view') === 'today' ? today : null;
+		let repeatRule: RepeatRule | null = null;
 
 		// parse=false (the user dismissed a chip) keeps the text literal and ignores any picked date.
 		if (text(form, 'parse') !== 'false') {
@@ -84,26 +86,49 @@ export const taskActions = {
 
 			const lists = raw.includes('#') ? await data.lists.all(userId) : [];
 			const dateOrder = dateOrderFor(form, event.request);
-			const parsed = parseQuickAdd(raw, { today, lists, dateOrder });
+			const parsed = parseQuickAdd(raw, { today, lists, dateOrder, pickedDate: picked || null });
 			title = parsed.title;
 			listId = parsed.listId ?? listId;
-			dueDate = picked || parsed.dueDate || dueDate;
+			dueDate = parsed.dueDate || dueDate;
+			repeatRule = parsed.repeat;
 		}
 
-		const task = found(await data.tasks.create(userId, { title, listId, dueDate }));
+		const task = found(await data.tasks.create(userId, { title, listId, dueDate, repeatRule }));
 		return {
 			added: { id: task.id, title: task.title, listId: task.listId, dueDate: task.dueDate }
 		};
 	},
 
+	/**
+	 * Complete or reopen a task. Completing a recurring task creates its next
+	 * occurrence (unless a guest is at the cap: then it completes without one).
+	 * Repeating the same request (double submit) is a harmless no-op.
+	 */
 	async toggleTask(event: Event) {
-		const { userId, form } = await setup(event);
-		found(await data.tasks.setCompleted(userId, id(form), text(form, 'completed') === 'true'));
+		const { userId, timeZone, isGuest, form } = await setup(event);
+		const taskId = id(form);
+		if (text(form, 'completed') !== 'true') {
+			if (!(await data.tasks.uncomplete(userId, taskId)))
+				found(await data.tasks.get(userId, taskId));
+			return;
+		}
+		const allowNext = !isGuest || (await data.tasks.countAll(userId)) < GUEST_LIMITS.tasks;
+		const result = await data.tasks.complete(userId, taskId, todayIn(timeZone), { allowNext });
+		if (!result) {
+			found(await data.tasks.get(userId, taskId));
+			return { completed: { next: null, capped: false } };
+		}
+		return {
+			completed: {
+				next: result.next ? { id: result.next.id, dueDate: result.next.dueDate } : null,
+				capped: result.nextBlocked
+			}
+		};
 	},
 
 	/** Save from the detail panel: title, notes, due date, pin and (optionally) list. */
 	async saveTask(event: Event) {
-		const { userId, form } = await setup(event);
+		const { userId, timeZone, form } = await setup(event);
 		const taskId = id(form);
 		const title = text(form, 'title').trim();
 		const notes = text(form, 'notes').trim();
@@ -121,7 +146,35 @@ export const taskActions = {
 		// Checkboxes send nothing when unticked, so the form marks that the field was present.
 		if (form.has('pinField')) values.pinnedToday = form.has('pinnedToday');
 
+		// Repeat: the panel marks that its Repeat fields were present.
+		let repeat: RepeatRule | null | undefined;
+		if (form.has('repeatField')) {
+			const task = found(await data.tasks.get(userId, taskId));
+			const today = todayIn(timeZone);
+			const start = ('dueDate' in values ? values.dueDate : task.dueDate) ?? today;
+			const current = task.repeatRule;
+			try {
+				repeat = ruleFromFields(
+					{
+						repeat: text(form, 'repeat'),
+						interval: text(form, 'interval'),
+						weekdays: form.getAll('weekday').map(String),
+						monthDay: text(form, 'monthDay'),
+						// An unchanged yearly task keeps its own day (29 Feb stays 29 Feb in other years).
+						...(current?.freq === 'yearly' && start === task.dueDate
+							? { month: String(current.month), day: String(current.monthDay) }
+							: {})
+					},
+					start
+				);
+			} catch {
+				return fail(400, { saveError: 'Invalid repeat' });
+			}
+		}
+
 		found(await data.tasks.update(userId, taskId, values));
+		if (repeat !== undefined)
+			found(await data.tasks.setRepeat(userId, taskId, repeat, todayIn(timeZone)));
 		if (form.has('listId'))
 			found(await data.tasks.move(userId, taskId, optionalId(form, 'listId')));
 	},
