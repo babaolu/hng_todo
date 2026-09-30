@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, isNull, max, min, ne, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, isNull, max, min, ne, sql } from 'drizzle-orm';
 import { lists, tasks } from './db/schema';
 import type { Db } from './db/types';
 import { generateKeyBetween, keyBetween } from './ordering';
@@ -36,6 +36,12 @@ export function createListStore(db: Db) {
 		},
 
 		get,
+
+		/** Every list row the user has, soft-deleted included (for guest caps). */
+		async countAll(userId: string): Promise<number> {
+			const [row] = await db.select({ n: count() }).from(lists).where(eq(lists.userId, userId));
+			return row?.n ?? 0;
+		},
 
 		/** New lists go to the bottom of the sidebar. */
 		async create(userId: string, name: string) {

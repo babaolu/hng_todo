@@ -22,6 +22,13 @@
       "when": 1790755882121,
       "tag": "0002_due_dates",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790762894618,
+      "tag": "0003_guest_mode",
+      "breakpoints": true
     }
   ]
 }

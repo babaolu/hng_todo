@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { enhance } from '$app/forms';
 
-	let { form } = $props();
+	let { data, form } = $props();
+	let guestPending = $state(false);
 	let pending = $state(false);
 	let showPassword = $state(false);
 	// The show/hide button needs JS; without it the field stays a plain password field.
@@ -29,8 +30,35 @@
 			</p>
 		{/if}
 
+		{#if data.guestMode}
+			<form
+				method="POST"
+				action="?/guest"
+				class="space-y-2 rounded-xl border border-accent/40 bg-accent-soft p-4 text-center"
+				use:enhance={() => {
+					guestPending = true;
+					return async ({ update }) => {
+						await update({ reset: false });
+						guestPending = false;
+					};
+				}}
+			>
+				<button class="btn-primary w-full py-2.5 text-base" disabled={guestPending}>
+					{guestPending ? 'Setting up…' : 'Continue as guest'}
+				</button>
+				<p class="text-sm text-muted">
+					Try it without an account. Guest data is deleted after 7 days.
+				</p>
+				{#if form?.guestError}
+					<p class="text-sm text-danger" role="alert">{form.guestError}</p>
+				{/if}
+			</form>
+			<p class="text-center text-xs text-muted">or log in</p>
+		{/if}
+
 		<form
 			method="POST"
+			action="?/login"
 			class="space-y-4 rounded-xl border border-line bg-surface p-6 shadow-sm"
 			use:enhance={() => {
 				pending = true;

@@ -7,8 +7,14 @@
 	import { toasts } from '$lib/toasts.svelte';
 	import type { List } from '$lib/types';
 
-	type Props = { lists: List[]; counts: Record<string, number>; email: string };
-	let { lists, counts, email }: Props = $props();
+	type Props = {
+		lists: List[];
+		counts: Record<string, number>;
+		email: string;
+		/** Guests leave via a confirmation page, because leaving deletes their data. */
+		guest?: boolean;
+	};
+	let { lists, counts, email, guest = false }: Props = $props();
 
 	let active = $derived(lists.filter((l) => !l.archived));
 	const archived = $derived(lists.filter((l) => l.archived));
@@ -162,10 +168,19 @@
 		</details>
 	{/if}
 
-	<div class="mt-auto flex items-center gap-2 border-t border-line px-2 pt-3">
-		<span class="min-w-0 flex-1 truncate text-xs text-muted" title={email}>{email}</span>
-		<form method="POST" action="/logout">
-			<button class="btn-ghost px-2 py-1 text-xs">Log out</button>
-		</form>
-	</div>
+	{#if guest}
+		<div class="mt-auto space-y-1 border-t border-line px-2 pt-3">
+			<p class="text-xs text-muted">Guest account</p>
+			<a href="/logout" class="-mx-2 btn-ghost w-full justify-start px-2 py-1 text-xs text-danger"
+				>Leave and delete guest data</a
+			>
+		</div>
+	{:else}
+		<div class="mt-auto flex items-center gap-2 border-t border-line px-2 pt-3">
+			<span class="min-w-0 flex-1 truncate text-xs text-muted" title={email}>{email}</span>
+			<form method="POST" action="/logout">
+				<button class="btn-ghost px-2 py-1 text-xs">Log out</button>
+			</form>
+		</div>
+	{/if}
 </nav>

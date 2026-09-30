@@ -23,14 +23,32 @@ const timestamps = {
 	updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
 };
 
-export const users = pgTable('users', {
-	id: uuid('id').primaryKey().defaultRandom(),
-	email: text('email').notNull().unique(),
-	passwordHash: text('password_hash').notNull(),
-	/** IANA zone used to work out "today" for this user; kept in sync from the browser. */
-	timeZone: text('time_zone').notNull().default('UTC'),
-	createdAt: timestamps.createdAt
-});
+export const users = pgTable(
+	'users',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		email: text('email').notNull().unique(),
+		/** argon2id hash. Guests get an unusable placeholder (see guests.ts) and can't log in. */
+		passwordHash: text('password_hash').notNull(),
+		/** IANA zone used to work out "today" for this user; kept in sync from the browser. */
+		timeZone: text('time_zone').notNull().default('UTC'),
+		/** Temporary guest account (GUEST_MODE): deleted 7 days after creation, or when guest mode is off. */
+		isGuest: boolean('is_guest').notNull().default(false),
+		/** Client IP that created the guest, for per-IP rate limiting. Null for real users. */
+		guestIp: text('guest_ip'),
+		createdAt: timestamps.createdAt
+	},
+	(t) => [
+		// Guest expiry cleanup and the global cap.
+		index('users_guest_created_idx')
+			.on(t.createdAt)
+			.where(sql`${t.isGuest}`),
+		// Guest creation rate limit per IP.
+		index('users_guest_ip_idx')
+			.on(t.guestIp, t.createdAt)
+			.where(sql`${t.isGuest}`)
+	]
+);
 
 export const sessions = pgTable(
 	'sessions',

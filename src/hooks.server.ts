@@ -2,6 +2,7 @@ import { redirect, type Handle, type ServerInit } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { isValidTimeZone } from '$lib/dates';
 import { data, useDb } from '$lib/server/data';
+import { guestModeOn } from '$lib/server/guest-mode';
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from '$lib/server/session';
 
 export const init: ServerInit = async () => {
@@ -10,6 +11,18 @@ export const init: ServerInit = async () => {
 	if (import.meta.env.DEV && env.DATABASE_URL?.startsWith('pglite:')) {
 		const { createPgliteDb } = await import('$lib/server/db/pglite');
 		useDb((await createPgliteDb(env.DATABASE_URL.slice('pglite:'.length))).db);
+	}
+
+	// Guest mode off: remove every guest account. Changing GUEST_MODE on Vercel needs a
+	// redeploy, so every new instance runs this. A failure here mustn't stop the server
+	// starting; the per-request check below and login housekeeping are the backup.
+	if (!guestModeOn()) {
+		try {
+			const deleted = await data.guests.deleteAll();
+			console.log(`[guest-mode] off: deleted ${deleted} guest account(s) at start-up`);
+		} catch (err) {
+			console.error('[guest-mode] start-up cleanup failed', err);
+		}
 	}
 };
 
@@ -22,7 +35,12 @@ export const handle: Handle = async ({ event, resolve }) => {
 	const token = event.cookies.get(SESSION_COOKIE);
 	if (token) {
 		const session = await data.auth.validateSession(token);
-		if (session) {
+		if (session?.user.isGuest && !guestModeOn()) {
+			// Guest mode was turned off: this guest's account and data go now.
+			await data.guests.remove(session.user.id);
+			console.log('[guest-mode] off: deleted 1 guest account on request');
+			clearSessionCookie(event.cookies);
+		} else if (session) {
 			event.locals.user = session.user;
 			if (session.renewed) setSessionCookie(event.cookies, token, session.expiresAt);
 

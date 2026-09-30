@@ -131,6 +131,12 @@ export function createTaskStore(db: Db) {
 
 		get,
 
+		/** Every task row the user has, soft-deleted and completed included (for guest caps). */
+		async countAll(userId: string): Promise<number> {
+			const [row] = await db.select({ n: count() }).from(tasks).where(eq(tasks.userId, userId));
+			return row?.n ?? 0;
+		},
+
 		/** New tasks go to the top of their list. Returns null if the list isn't the user's. */
 		async create(
 			userId: string,

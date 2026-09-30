@@ -1,18 +1,22 @@
-import { fail, redirect } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
+import { isValidTimeZone } from '$lib/dates';
 import { data } from '$lib/server/data';
-import { setSessionCookie } from '$lib/server/session';
-import type { Actions } from './$types';
+import { guestModeOn } from '$lib/server/guest-mode';
+import { clientIp, setSessionCookie } from '$lib/server/session';
+import type { Actions, PageServerLoad } from './$types';
+
+export const load: PageServerLoad = () => ({ guestMode: guestModeOn() });
 
 export const actions = {
-	default: async ({ request, cookies, getClientAddress }) => {
-		const form = await request.formData();
+	login: async (event) => {
+		const form = await event.request.formData();
 		const email = String(form.get('email') ?? '').slice(0, 320);
 		const password = String(form.get('password') ?? '').slice(0, 1024);
 
-		// adapter-vercel returns X-Forwarded-For, which Vercel overwrites with the real client IP.
-		// Take the first entry, and never pass null (it would match no lockout rows).
-		const ip = (getClientAddress() ?? '').split(',')[0].trim() || 'unknown';
-		const result = await data.auth.login(email, password, ip);
+		// Housekeeping: expired guests go (or all guests, when guest mode is off).
+		await data.guests.housekeep(guestModeOn());
+
+		const result = await data.auth.login(email, password, clientIp(event));
 		if (!result.ok) {
 			const message =
 				result.reason === 'locked'
@@ -22,7 +26,29 @@ export const actions = {
 		}
 
 		const { token, expiresAt } = await data.auth.createSession(result.user.id);
-		setSessionCookie(cookies, token, expiresAt);
+		setSessionCookie(event.cookies, token, expiresAt);
+		redirect(303, '/');
+	},
+
+	/** "Continue as guest": a POST only, so nothing is ever created by a GET. */
+	guest: async (event) => {
+		if (!guestModeOn()) error(404, 'Not found');
+
+		const zone = event.cookies.get('tz');
+		const result = await data.guests.create(
+			clientIp(event),
+			zone && isValidTimeZone(zone) ? zone : 'UTC'
+		);
+		if (!result.ok) {
+			return fail(result.reason === 'full' ? 503 : 429, {
+				guestError:
+					result.reason === 'full'
+						? 'Guest mode is full right now, try again later.'
+						: 'Too many guest accounts from your network. Try again in an hour.'
+			});
+		}
+
+		setSessionCookie(event.cookies, result.token, result.expiresAt);
 		redirect(303, '/');
 	}
 } satisfies Actions;

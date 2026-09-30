@@ -2,6 +2,7 @@ import { error, fail, redirect, type RequestEvent } from '@sveltejs/kit';
 import { isDateString, todayIn } from '$lib/dates';
 import { parseQuickAdd, type DateOrder } from '$lib/quick-add';
 import { data } from './data';
+import { GUEST_LIMITS } from './guests';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const MAX_TITLE = 500;
@@ -47,7 +48,8 @@ type Event = RequestEvent;
 
 async function setup({ locals, request }: Event) {
 	const userId = requireUser(locals);
-	return { userId, timeZone: locals.user!.timeZone, form: await request.formData() };
+	const { timeZone, isGuest } = locals.user!;
+	return { userId, timeZone, isGuest, form: await request.formData() };
 }
 
 /** Form actions shared by every task view (Today, Upcoming, Inbox, lists, Logbook). */
@@ -57,10 +59,16 @@ export const taskActions = {
 	 * client for its preview are never trusted. parse=false keeps the text literal.
 	 */
 	async addTask(event: Event) {
-		const { userId, timeZone, form } = await setup(event);
+		const { userId, timeZone, isGuest, form } = await setup(event);
 		const raw = text(form, 'title').trim();
 		if (!raw) return fail(400, { addError: 'Title is required' });
 		if (raw.length > MAX_TITLE) return fail(400, { addError: 'Title is too long' });
+		// Guests only; deleted tasks count too, so a create/delete loop can't grow the database.
+		if (isGuest && (await data.tasks.countAll(userId)) >= GUEST_LIMITS.tasks) {
+			return fail(403, {
+				addError: `Guest accounts can hold up to ${GUEST_LIMITS.tasks} tasks, including completed and deleted ones.`
+			});
+		}
 
 		const today = todayIn(timeZone);
 		let title = raw;
@@ -162,10 +170,15 @@ export const taskActions = {
 /** Form actions for the sidebar and list header, available on every app page. */
 export const listActions = {
 	async createList(event: Event) {
-		const { userId, form } = await setup(event);
+		const { userId, isGuest, form } = await setup(event);
 		const name = text(form, 'name').trim();
 		if (!name) return fail(400, { listError: 'Name is required' });
 		if (name.length > MAX_LIST_NAME) return fail(400, { listError: 'Name is too long' });
+		if (isGuest && (await data.lists.countAll(userId)) >= GUEST_LIMITS.lists) {
+			return fail(403, {
+				listError: `Guest accounts can have up to ${GUEST_LIMITS.lists} lists, including deleted ones.`
+			});
+		}
 		const list = await data.lists.create(userId, name);
 		redirect(303, `/lists/${list.id}`);
 	},

@@ -117,6 +117,18 @@ Both print only the email and the database host.
   - `DATABASE_URL`: the pooled Neon URL
   - `ENABLE_EXPERIMENTAL_COREPACK` = `1`: makes Vercel use the pnpm version pinned in `package.json`
 
+## Guest mode (temporary)
+
+`GUEST_MODE=on` lets anyone use the app as a private guest, without an account: `/login` shows **Continue as guest**. Any other value, or unset, means off. It's read on every request.
+
+- A guest is a normal user row with `is_guest = true`, a random `@guest.invalid` email and no usable password. Guests can't log in with the password form.
+- Each guest starts with 2 lists and 8 sample tasks, dated relative to their own today.
+- Guest accounts are deleted **7 days after creation**, however active. Expired guests are cleaned up whenever someone creates a guest or tries to log in. "Leave and delete guest data" (instead of Log out) deletes the guest immediately.
+- Limits: 10 new guests per IP per hour, 500 guests at once, and 200 tasks and 20 lists per guest (deleted ones count). Real accounts have no caps.
+- **Turning it off deletes every guest and all their data.** On start-up each server instance deletes all guests while the mode is off. As a backup, any remaining guest session is deleted on its next request, and login housekeeping deletes guests too. Every cleanup is filtered on `is_guest = true` and never touches real accounts.
+
+On Vercel: set `GUEST_MODE` to `on` for Production, then redeploy. To turn it off, remove the variable (or set it to anything else) and redeploy.
+
 ## How it fits together
 
 - `src/lib/server/db/schema.ts`: tables. Every row has `user_id`; deletes are soft (`deleted_at`).
