@@ -2,7 +2,7 @@ import { redirect, type Handle, type ServerInit } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { isValidTimeZone } from '$lib/dates';
 import { data, useDb } from '$lib/server/data';
-import { guestModeOn } from '$lib/server/guest-mode';
+import { guestCleanup, guestModeOn } from '$lib/server/guest-mode';
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from '$lib/server/session';
 
 export const init: ServerInit = async () => {
@@ -13,10 +13,12 @@ export const init: ServerInit = async () => {
 		useDb((await createPgliteDb(env.DATABASE_URL.slice('pglite:'.length))).db);
 	}
 
-	// Guest mode off: remove every guest account. Changing GUEST_MODE on Vercel needs a
-	// redeploy, so every new instance runs this. A failure here mustn't stop the server
-	// starting; the per-request check below and login housekeeping are the backup.
-	if (!guestModeOn()) {
+	// GUEST_MODE=off: remove every guest account. Only an explicit "off" deletes, never an
+	// unset or unknown value, and never during a build (see guest-mode.ts). Changing
+	// GUEST_MODE on Vercel needs a redeploy, so every new instance runs this. A failure here
+	// mustn't stop the server starting; the per-request check below and login housekeeping
+	// are the backup.
+	if (guestCleanup() === 'all') {
 		try {
 			const deleted = await data.guests.deleteAll();
 			console.log(`[guest-mode] off: deleted ${deleted} guest account(s) at start-up`);
@@ -36,9 +38,12 @@ export const handle: Handle = async ({ event, resolve }) => {
 	if (token) {
 		const session = await data.auth.validateSession(token);
 		if (session?.user.isGuest && !guestModeOn()) {
-			// Guest mode was turned off: this guest's account and data go now.
-			await data.guests.remove(session.user.id);
-			console.log('[guest-mode] off: deleted 1 guest account on request');
+			// Guests aren't allowed now: sign this one out. With GUEST_MODE=off its account and
+			// data go too; otherwise (unset or unknown value) nothing is deleted.
+			if (guestCleanup() === 'all') {
+				await data.guests.remove(session.user.id);
+				console.log('[guest-mode] off: deleted 1 guest account on request');
+			}
 			clearSessionCookie(event.cookies);
 		} else if (session) {
 			event.locals.user = session.user;

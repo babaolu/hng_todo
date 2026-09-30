@@ -49,11 +49,11 @@ There is no sign-up. `pnpm seed:user` creates the first account, or resets its p
 | `pnpm test`            | Vitest; each file runs against an in-memory PGlite                             |
 | `pnpm db:generate`     | Generate a SQL migration from `src/lib/server/db/schema.ts` into `drizzle/`    |
 | `pnpm db:migrate`      | Apply pending migrations in `drizzle/` to `DATABASE_URL`                       |
-| `pnpm db:migrate:prod` | Same, against `.env.production.local` (Neon)                                   |
+| `pnpm db:migrate:prod` | Same, against `.env.prod` (Neon)                                               |
 | `pnpm seed:user`       | Create or update the single account                                            |
-| `pnpm seed:user:prod`  | Same, against `.env.production.local` (Neon)                                   |
+| `pnpm seed:user:prod`  | Same, against `.env.prod` (Neon)                                               |
 | `pnpm user:add`        | Add an account (create-only); `--reset` changes an existing account's password |
-| `pnpm user:add:prod`   | Same, against `.env.production.local` (Neon)                                   |
+| `pnpm user:add:prod`   | Same, against `.env.prod` (Neon)                                               |
 
 ## Migrations
 
@@ -82,7 +82,7 @@ Production is a Vercel project imported from GitHub (`main` branch), with functi
 
 ### Production env file
 
-`.env.production.local` (git-ignored) holds the Neon connection strings. Quote the values, because the `&` in the query string breaks shell sourcing:
+`.env.prod` (git-ignored) holds the Neon connection strings. It's deliberately not named `.env.production*`: Vite loads those automatically in production mode, so `vite build` or `pnpm preview` would run the server against the production database. Never run those with production credentials; use only the `:prod` scripts below. Quote the values, because the `&` in the query string breaks shell sourcing:
 
 ```sh
 DATABASE_URL='postgresql://…@ep-…-pooler.c-2.eu-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
@@ -93,21 +93,21 @@ The pooled `DATABASE_URL` is for the app and the seed. The direct URL is for mig
 
 ### Targeting production
 
-| Local (`.env`)    | Production (`.env.production.local`) |
-| ----------------- | ------------------------------------ |
-| `pnpm db:migrate` | `pnpm db:migrate:prod`               |
-| `pnpm seed:user`  | `pnpm seed:user:prod`                |
-| `pnpm user:add`   | `pnpm user:add:prod`                 |
+| Local (`.env`)    | Production (`.env.prod`) |
+| ----------------- | ------------------------ |
+| `pnpm db:migrate` | `pnpm db:migrate:prod`   |
+| `pnpm seed:user`  | `pnpm seed:user:prod`    |
+| `pnpm user:add`   | `pnpm user:add:prod`     |
 
-The `:prod` scripts set `ENV_FILE=.env.production.local`. That file must exist, it overrides anything already exported in your shell, and `.env` is never read. Both commands print the database host they used.
+The `:prod` scripts set `ENV_FILE=.env.prod`. That file must exist, it overrides anything already exported in your shell, and `.env` is never read. Both commands print the database host they used.
 
-To (re)create the account in production, add quoted `ADMIN_EMAIL` and `ADMIN_PASSWORD` to `.env.production.local`, run `pnpm seed:user:prod`, then delete the `ADMIN_PASSWORD` line.
+To (re)create the account in production, add quoted `ADMIN_EMAIL` and `ADMIN_PASSWORD` to `.env.prod`, run `pnpm seed:user:prod`, then delete the `ADMIN_PASSWORD` line.
 
 ### Adding accounts
 
 Use `user:add`, not `seed:user`. It never overwrites an existing account.
 
-1. Add quoted `NEW_USER_EMAIL` and `NEW_USER_PASSWORD` (at least 12 characters) to `.env.production.local`.
+1. Add quoted `NEW_USER_EMAIL` and `NEW_USER_PASSWORD` (at least 12 characters) to `.env.prod`.
 2. Run one of:
    - `pnpm user:add:prod`: creates the account. It fails without changing anything if the email already exists.
    - `pnpm user:add:prod --reset`: sets a new password for an **existing** account and signs out its sessions. It fails if the email doesn't exist.
@@ -124,15 +124,21 @@ Both print only the email and the database host.
 
 ## Guest mode (temporary)
 
-`GUEST_MODE=on` lets anyone use the app as a private guest, without an account: `/login` shows **Continue as guest**. Any other value, or unset, means off. It's read on every request.
+`GUEST_MODE=on` lets anyone use the app as a private guest, without an account: `/login` shows **Continue as guest**. It's read on every request.
+
+| `GUEST_MODE`              | New guests | Existing guest sessions | Guest data                             |
+| ------------------------- | ---------- | ----------------------- | -------------------------------------- |
+| `on`                      | allowed    | work                    | deleted 7 days after creation          |
+| `off`                     | blocked    | signed out              | **all deleted**                        |
+| unset, or any other value | blocked    | signed out              | kept (nothing deleted); logs a warning |
 
 - A guest is a normal user row with `is_guest = true`, a random `@guest.invalid` email and no usable password. Guests can't log in with the password form.
-- Each guest starts with 2 lists and 8 sample tasks, dated relative to their own today.
-- Guest accounts are deleted **7 days after creation**, however active. Expired guests are cleaned up whenever someone creates a guest or tries to log in. "Leave and delete guest data" (instead of Log out) deletes the guest immediately.
+- Each guest starts with 2 lists and 9 sample tasks, dated relative to their own today.
+- Guest accounts are deleted **7 days after creation**, however active. While the mode is `on`, expired guests are cleaned up whenever someone creates a guest or tries to log in. "Leave and delete guest data" (instead of Log out) deletes the guest immediately.
 - Limits: 10 new guests per IP per hour, 500 guests at once, and 200 tasks and 20 lists per guest (deleted ones count). Real accounts have no caps.
-- **Turning it off deletes every guest and all their data.** On start-up each server instance deletes all guests while the mode is off. As a backup, any remaining guest session is deleted on its next request, and login housekeeping deletes guests too. Every cleanup is filtered on `is_guest = true` and never touches real accounts.
+- **`GUEST_MODE=off` deletes every guest and all their data.** On start-up each server instance deletes all guests. As a backup, any remaining guest session is deleted on its next request, and login housekeeping deletes guests too. Only the exact value `off` does this, so a missing or mistyped variable can never wipe guest data, and no cleanup ever runs during a build. Every cleanup is filtered on `is_guest = true` and never touches real accounts.
 
-On Vercel: set `GUEST_MODE` to `on` for Production, then redeploy. To turn it off, remove the variable (or set it to anything else) and redeploy.
+On Vercel: set `GUEST_MODE` to `on` for Production, then redeploy. To turn it off and delete all guest data, set it to `off` (don't remove it) and redeploy. Removing the variable only disables guests: nothing is deleted, and the data stays until you set `off`.
 
 ## How it fits together
 

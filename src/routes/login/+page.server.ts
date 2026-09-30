@@ -1,7 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { isValidTimeZone } from '$lib/dates';
 import { data } from '$lib/server/data';
-import { guestModeOn } from '$lib/server/guest-mode';
+import { guestCleanup, guestModeOn } from '$lib/server/guest-mode';
 import { clientIp, setSessionCookie } from '$lib/server/session';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -13,8 +13,9 @@ export const actions = {
 		const email = String(form.get('email') ?? '').slice(0, 320);
 		const password = String(form.get('password') ?? '').slice(0, 1024);
 
-		// Housekeeping: expired guests go (or all guests, when guest mode is off).
-		await data.guests.housekeep(guestModeOn());
+		// Housekeeping: expired guests go while guest mode is on, every guest when it's "off",
+		// nothing otherwise.
+		await data.guests.housekeep(guestCleanup());
 
 		const result = await data.auth.login(email, password, clientIp(event));
 		if (!result.ok) {

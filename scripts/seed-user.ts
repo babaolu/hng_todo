@@ -1,6 +1,6 @@
 /**
  * Create or update the single account from ADMIN_EMAIL / ADMIN_PASSWORD.
- * Usage: pnpm seed:user (reads .env) or pnpm seed:user:prod (reads .env.production.local)
+ * Usage: pnpm seed:user (reads .env) or pnpm seed:user:prod (reads .env.prod)
  */
 import { eq } from 'drizzle-orm';
 import { normalizeEmail } from '../src/lib/server/auth';

@@ -164,27 +164,38 @@ describe('guest lifetime is fixed at 7 days', () => {
 });
 
 describe('cleanup only ever deletes guests', () => {
-	it('deleteExpired (guest mode on) leaves a 30-day-old real user and all its data alone', async () => {
+	it('housekeep("expired") (guest mode on) leaves a 30-day-old real user and all its data alone', async () => {
 		const real = await realUserWithData();
 		const before = await rowsFor(real);
 		const g = await makeGuest();
 		now = new Date(now.getTime() + 8 * DAY);
-		expect(await guests().housekeep(true)).toBe(1);
+		expect(await guests().housekeep('expired')).toBe(1);
 		expect(await rowsFor(real)).toEqual(before);
 		expect((await rowsFor(g.userId)).user).toBe(0);
 	});
 
-	it('deleteAll (guest mode off) deletes every guest and no real user', async () => {
+	it('housekeep("all") (GUEST_MODE=off) deletes every guest and no real user', async () => {
 		const real = await realUserWithData();
 		const before = await rowsFor(real);
 		const g1 = await makeGuest('203.0.113.20');
 		const g2 = await makeGuest('203.0.113.21');
-		expect(await guests().housekeep(false)).toBe(2);
+		expect(await guests().housekeep('all')).toBe(2);
 		expect(await rowsFor(real)).toEqual(before);
 		for (const g of [g1, g2]) {
 			expect(await rowsFor(g.userId)).toEqual({ user: 0, sessions: 0, lists: 0, tasks: 0 });
 		}
 		expect(await db.select().from(users).where(eq(users.isGuest, true))).toEqual([]);
+	});
+
+	it('housekeep("none") (GUEST_MODE unset or unknown) deletes nothing, not even expired guests', async () => {
+		const real = await realUserWithData();
+		const before = await rowsFor(real);
+		const g = await makeGuest('203.0.113.22');
+		const gBefore = await rowsFor(g.userId);
+		now = new Date(now.getTime() + 8 * DAY);
+		expect(await guests().housekeep('none')).toBe(0);
+		expect(await rowsFor(real)).toEqual(before);
+		expect(await rowsFor(g.userId)).toEqual(gBefore);
 	});
 
 	it('remove() deletes one guest and everything it owns, and refuses real users and other guests', async () => {

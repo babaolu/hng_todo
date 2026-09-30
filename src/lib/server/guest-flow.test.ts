@@ -1,6 +1,7 @@
 /**
  * Guest mode end to end through the real hooks, login and logout actions and
- * task/list actions, against PGlite, with the GUEST_MODE switch mocked.
+ * task/list actions, against PGlite. GUEST_MODE and SvelteKit's `building` flag are
+ * mocked; the real guest-mode rules (./guest-mode.ts) decide what happens.
  */
 import {
 	isActionFailure,
@@ -21,11 +22,12 @@ import { SESSION_COOKIE } from './session';
 import { createTaskStore } from './tasks';
 import { createTestDb, createUser } from './test/db';
 
-const mode = vi.hoisted(() => ({ on: true }));
+const env = vi.hoisted(() => ({ GUEST_MODE: 'on' }) as { GUEST_MODE?: string });
+const app = vi.hoisted(() => ({ building: false, dev: false }));
 const stores = vi.hoisted(() => ({}) as Record<string, unknown>);
-vi.mock('$lib/server/guest-mode', () => ({ guestModeOn: () => mode.on }));
+vi.mock('$env/dynamic/private', () => ({ env }));
+vi.mock('$app/environment', () => app);
 vi.mock('$lib/server/data', () => ({ data: stores, useDb: () => {} }));
-vi.mock('$env/dynamic/private', () => ({ env: {} }));
 
 const hooks = await import('../../hooks.server');
 const loginRoute = await import('../../routes/login/+page.server');
@@ -41,7 +43,10 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 beforeEach(async () => {
-	mode.on = true;
+	env.GUEST_MODE = 'on';
+	app.building = false;
+	vi.restoreAllMocks();
+	vi.spyOn(console, 'warn').mockImplementation(() => {});
 	await db.delete(users);
 	Object.assign(stores, {
 		auth: createAuthStore(db),
@@ -133,7 +138,7 @@ const realRows = async () => ({
 describe('creating a guest from /login', () => {
 	it('shows the button only when guest mode is on', () => {
 		expect(loginRoute.load({} as never)).toEqual({ guestMode: true });
-		mode.on = false;
+		env.GUEST_MODE = 'off';
 		expect(loginRoute.load({} as never)).toEqual({ guestMode: false });
 	});
 
@@ -149,7 +154,7 @@ describe('creating a guest from /login', () => {
 	});
 
 	it('returns 404 when guest mode is off, and creates nothing', async () => {
-		mode.on = false;
+		env.GUEST_MODE = 'off';
 		const r = await caught(() => loginRoute.actions.guest(event('/login', { form: {} })));
 		expect(isHttpError(r.thrown) && r.thrown.status).toBe(404);
 		expect(await guestCount()).toBe(0);
@@ -180,7 +185,7 @@ describe('guest mode off', () => {
 	it('start-up cleanup deletes every guest and no real user', async () => {
 		await createGuestViaAction('203.0.113.7');
 		await createGuestViaAction('203.0.113.8');
-		mode.on = false;
+		env.GUEST_MODE = 'off';
 		const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 		await hooks.init();
 		expect(await guestCount()).toBe(0);
@@ -198,7 +203,7 @@ describe('guest mode off', () => {
 	it('an existing guest session is deleted, its cookie cleared, and the request sent to /login', async () => {
 		const { token, user } = await createGuestViaAction();
 		const other = await createGuestViaAction('203.0.113.9');
-		mode.on = false;
+		env.GUEST_MODE = 'off';
 		vi.spyOn(console, 'log').mockImplementation(() => {});
 		const cookies = jar({ [SESSION_COOKIE]: token });
 		const r = await caught(() =>
@@ -217,7 +222,7 @@ describe('guest mode off', () => {
 
 	it('the same on /login itself: deleted and shown the login page, no redirect loop', async () => {
 		const { token } = await createGuestViaAction();
-		mode.on = false;
+		env.GUEST_MODE = 'off';
 		vi.spyOn(console, 'log').mockImplementation(() => {});
 		const e = event('/login', { cookies: jar({ [SESSION_COOKIE]: token }) });
 		const res = await hooks.handle({ event: e, resolve: async () => new Response('login page') });
@@ -229,7 +234,7 @@ describe('guest mode off', () => {
 
 	it('login housekeeping deletes all guests, and real users still log in', async () => {
 		await createGuestViaAction();
-		mode.on = false;
+		env.GUEST_MODE = 'off';
 		const r = await caught(() =>
 			loginRoute.actions.login(
 				event('/login', { form: { email: 'real@example.com', password: 'a-real-password-1' } })
@@ -237,6 +242,114 @@ describe('guest mode off', () => {
 		);
 		expect(isRedirect(r.thrown) && r.thrown.location).toBe('/');
 		expect(await guestCount()).toBe(0);
+	});
+});
+
+/** Every row a guest owns, to show that nothing of it was deleted. */
+const guestRows = async (id: string) => ({
+	user: (await db.select().from(users).where(eq(users.id, id))).length,
+	sessions: (await db.select().from(sessions).where(eq(sessions.userId, id))).length,
+	lists: (await db.select().from(lists).where(eq(lists.userId, id))).length,
+	tasks: (await db.select().from(tasks).where(eq(tasks.userId, id))).length
+});
+const SAMPLE_ROWS = { user: 1, sessions: 1, lists: 2, tasks: 9 };
+
+/** A guest created 8 days ago: expired, so "on" housekeeping would delete it. */
+async function expiredGuest(ip: string) {
+	const g = await createGuestViaAction(ip);
+	await db
+		.update(users)
+		.set({ createdAt: new Date(Date.now() - 8 * 86_400_000) })
+		.where(eq(users.id, g.user.id));
+	return g;
+}
+
+describe.each([
+	['unset', undefined],
+	['empty', ''],
+	['a typo', 'of'],
+	['upper case', 'OFF'],
+	['"false"', 'false']
+])('GUEST_MODE %s: guests blocked, nothing deleted', (_, value) => {
+	function setMode() {
+		if (value === undefined) delete env.GUEST_MODE;
+		else env.GUEST_MODE = value;
+	}
+
+	it('no guest button, and the guest action is a 404 that creates nothing', async () => {
+		setMode();
+		expect(loginRoute.load({} as never)).toEqual({ guestMode: false });
+		const r = await caught(() => loginRoute.actions.guest(event('/login', { form: {} })));
+		expect(isHttpError(r.thrown) && r.thrown.status).toBe(404);
+		expect(await guestCount()).toBe(0);
+	});
+
+	it('start-up cleanup deletes nothing', async () => {
+		const g = await createGuestViaAction('203.0.113.40');
+		const old = await expiredGuest('203.0.113.41');
+		setMode();
+		const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+		await hooks.init();
+		expect(await guestRows(g.user.id)).toEqual(SAMPLE_ROWS);
+		expect(await guestRows(old.user.id)).toEqual(SAMPLE_ROWS);
+		expect(await realRows()).toEqual(REAL_ROWS);
+		expect(log).not.toHaveBeenCalled();
+	});
+
+	it('a guest session is rejected (signed out, sent to /login) but its data is kept', async () => {
+		const g = await createGuestViaAction();
+		setMode();
+		const cookies = jar({ [SESSION_COOKIE]: g.token });
+		const e = event('/upcoming', { cookies });
+		const r = await caught(() =>
+			hooks.handle({ event: e, resolve: async () => new Response('ok') })
+		);
+		expect(isRedirect(r.thrown) && r.thrown.location).toBe('/login');
+		expect(e.locals.user).toBeNull();
+		expect(cookies.values.has(SESSION_COOKIE)).toBe(false);
+		expect(await guestRows(g.user.id)).toEqual(SAMPLE_ROWS);
+		expect(await realRows()).toEqual(REAL_ROWS);
+	});
+
+	it('login housekeeping deletes nothing, not even expired guests, and real users log in', async () => {
+		const old = await expiredGuest('203.0.113.42');
+		setMode();
+		const r = await caught(() =>
+			loginRoute.actions.login(
+				event('/login', { form: { email: 'real@example.com', password: 'a-real-password-1' } })
+			)
+		);
+		expect(isRedirect(r.thrown) && r.thrown.location).toBe('/');
+		expect(await guestRows(old.user.id)).toEqual(SAMPLE_ROWS);
+		expect(await realRows()).toEqual(REAL_ROWS);
+	});
+});
+
+describe('during a build nothing is deleted, even with GUEST_MODE=off', () => {
+	it('start-up, per-request and login cleanup all skip', async () => {
+		const g = await createGuestViaAction('203.0.113.50');
+		const old = await expiredGuest('203.0.113.51');
+		env.GUEST_MODE = 'off';
+		app.building = true;
+		const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+		await hooks.init();
+
+		const cookies = jar({ [SESSION_COOKIE]: g.token });
+		const e = event('/', { cookies });
+		await caught(() => hooks.handle({ event: e, resolve: async () => new Response('ok') }));
+		expect(e.locals.user).toBeNull(); // still not signed in as a guest
+
+		await caught(() =>
+			loginRoute.actions.login(
+				event('/login', { form: { email: 'real@example.com', password: 'a-real-password-1' } })
+			)
+		);
+
+		expect(await guestRows(g.user.id)).toMatchObject({ user: 1, lists: 2, tasks: 9 });
+		expect(await guestRows(old.user.id)).toEqual(SAMPLE_ROWS);
+		expect(await realRows()).toEqual(REAL_ROWS);
+		expect(log).not.toHaveBeenCalled();
 	});
 });
 

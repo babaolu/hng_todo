@@ -16,11 +16,11 @@
 		"format": "prettier --write .",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
-		"db:migrate:prod": "ENV_FILE=.env.production.local drizzle-kit migrate",
+		"db:migrate:prod": "ENV_FILE=.env.prod drizzle-kit migrate",
 		"seed:user": "tsx scripts/seed-user.ts",
-		"seed:user:prod": "ENV_FILE=.env.production.local tsx scripts/seed-user.ts",
+		"seed:user:prod": "ENV_FILE=.env.prod tsx scripts/seed-user.ts",
 		"user:add": "tsx scripts/user-add.ts",
-		"user:add:prod": "ENV_FILE=.env.production.local tsx scripts/user-add.ts"
+		"user:add:prod": "ENV_FILE=.env.prod tsx scripts/user-add.ts"
 	},
 	"devDependencies": {
 		"@electric-sql/pglite": "^0.5.8",

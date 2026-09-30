@@ -1,5 +1,5 @@
 /**
- * Temporary guest accounts (GUEST_MODE=on). A guest is a users row with
+ * Temporary guest accounts (GUEST_MODE=on; see guest-mode.ts for when cleanup may run). A guest is a users row with
  * is_guest = true, a random @guest.invalid email and a password hash that can
  * never match (login also rejects guests explicitly). Guests live exactly
  * GUEST_TTL from creation; deleting the users row cascades to their sessions,
@@ -13,6 +13,7 @@ import { and, count, eq, gt, lte } from 'drizzle-orm';
 import { addDays, todayIn } from '../dates';
 import type { RepeatRule } from '../repeat';
 import { createAuthStore, GUEST_TTL } from './auth';
+import type { GuestCleanup } from './guest-mode';
 import { users } from './db/schema';
 import type { Db } from './db/types';
 import { createListStore } from './lists';
@@ -118,9 +119,11 @@ export function createGuestStore(
 		deleteExpired,
 		deleteAll,
 
-		/** Login and guest creation run this: expired guests go, or every guest when the mode is off. */
-		housekeep(guestModeOn: boolean): Promise<number> {
-			return guestModeOn ? deleteExpired() : deleteAll();
+		/** Login runs this with guestCleanup(): expired guests, every guest ("off"), or nothing. */
+		async housekeep(cleanup: GuestCleanup): Promise<number> {
+			if (cleanup === 'expired') return deleteExpired();
+			if (cleanup === 'all') return deleteAll();
+			return 0;
 		},
 
 		/**

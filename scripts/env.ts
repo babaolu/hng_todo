@@ -4,7 +4,11 @@ import { config } from 'dotenv';
 /**
  * Load exactly one env file for CLI scripts: `ENV_FILE` if set, else `.env`.
  * A named file must exist and wins over variables already in the shell, so
- * `ENV_FILE=.env.production.local` can never fall back to the local database.
+ * `ENV_FILE=.env.prod` can never fall back to the local database.
+ *
+ * Production credentials live in `.env.prod` because Vite never loads that name by
+ * itself (it does load `.env.production*`), so `vite build` and `pnpm preview` can't
+ * reach the production database.
  */
 export function loadEnv(): string {
 	const file = process.env.ENV_FILE;
