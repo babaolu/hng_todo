@@ -31,21 +31,23 @@ pnpm dev
 
 With PGlite, run `seed:user` while the dev server is stopped (only one process can open the database directory).
 
-There is no sign-up. `pnpm seed:user` creates the one account, or resets its password (and signs out all its sessions) if it already exists. `ADMIN_EMAIL` and `ADMIN_PASSWORD` are only read by that script, never by the running app.
+There is no sign-up. `pnpm seed:user` creates the first account, or resets its password (and signs out all its sessions) if it already exists. Add more accounts with `pnpm user:add` (see [Adding accounts](#adding-accounts)). `ADMIN_*` and `NEW_USER_*` are only read by these scripts, never by the running app.
 
 ## Scripts
 
-| Script                 | What it does                                                                |
-| ---------------------- | --------------------------------------------------------------------------- |
-| `pnpm dev`             | Dev server                                                                  |
-| `pnpm build`           | Production build (Vercel adapter)                                           |
-| `pnpm check`           | `svelte-check` / TypeScript                                                 |
-| `pnpm test`            | Vitest; each file runs against an in-memory PGlite                          |
-| `pnpm db:generate`     | Generate a SQL migration from `src/lib/server/db/schema.ts` into `drizzle/` |
-| `pnpm db:migrate`      | Apply pending migrations in `drizzle/` to `DATABASE_URL`                    |
-| `pnpm db:migrate:prod` | Same, against `.env.production.local` (Neon)                                |
-| `pnpm seed:user`       | Create or update the single account                                         |
-| `pnpm seed:user:prod`  | Same, against `.env.production.local` (Neon)                                |
+| Script                 | What it does                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `pnpm dev`             | Dev server                                                                     |
+| `pnpm build`           | Production build (Vercel adapter)                                              |
+| `pnpm check`           | `svelte-check` / TypeScript                                                    |
+| `pnpm test`            | Vitest; each file runs against an in-memory PGlite                             |
+| `pnpm db:generate`     | Generate a SQL migration from `src/lib/server/db/schema.ts` into `drizzle/`    |
+| `pnpm db:migrate`      | Apply pending migrations in `drizzle/` to `DATABASE_URL`                       |
+| `pnpm db:migrate:prod` | Same, against `.env.production.local` (Neon)                                   |
+| `pnpm seed:user`       | Create or update the single account                                            |
+| `pnpm seed:user:prod`  | Same, against `.env.production.local` (Neon)                                   |
+| `pnpm user:add`        | Add an account (create-only); `--reset` changes an existing account's password |
+| `pnpm user:add:prod`   | Same, against `.env.production.local` (Neon)                                   |
 
 ## Migrations
 
@@ -89,10 +91,23 @@ The pooled `DATABASE_URL` is for the app and the seed. The direct URL is for mig
 | ----------------- | ------------------------------------ |
 | `pnpm db:migrate` | `pnpm db:migrate:prod`               |
 | `pnpm seed:user`  | `pnpm seed:user:prod`                |
+| `pnpm user:add`   | `pnpm user:add:prod`                 |
 
 The `:prod` scripts set `ENV_FILE=.env.production.local`. That file must exist, it overrides anything already exported in your shell, and `.env` is never read. Both commands print the database host they used.
 
 To (re)create the account in production, add quoted `ADMIN_EMAIL` and `ADMIN_PASSWORD` to `.env.production.local`, run `pnpm seed:user:prod`, then delete the `ADMIN_PASSWORD` line.
+
+### Adding accounts
+
+Use `user:add`, not `seed:user`. It never overwrites an existing account.
+
+1. Add quoted `NEW_USER_EMAIL` and `NEW_USER_PASSWORD` (at least 12 characters) to `.env.production.local`.
+2. Run one of:
+   - `pnpm user:add:prod`: creates the account. It fails without changing anything if the email already exists.
+   - `pnpm user:add:prod --reset`: sets a new password for an **existing** account and signs out its sessions. It fails if the email doesn't exist.
+3. Check the printed host, then delete both `NEW_USER_*` lines.
+
+Both print only the email and the database host.
 
 ### Vercel project settings
 
@@ -108,4 +123,4 @@ To (re)create the account in production, add quoted `ADMIN_EMAIL` and `ADMIN_PAS
 - `src/lib/server/data.ts`: binds the stores to Neon for the app. Routes and form actions use this.
 - `src/lib/server/actions.ts`: form actions shared by every view.
 - **Ordering** uses fractional indexing: a move rewrites only the moved row's `order` key, since neon-http has no interactive transactions. The `order` columns are `text COLLATE "C"`, so Postgres sorts keys byte-wise, the same way the key generator compares them.
-- **Auth:** argon2id password hash, random session token in an httpOnly cookie. Only its SHA-256 is stored. Sessions last 30 days and renew once less than 15 days remain. After 5 failed logins for an email within 15 minutes, that email is locked for 15 minutes. Unknown emails get the same response, timing and lockout as real ones.
+- **Auth:** argon2id password hash, random session token in an httpOnly cookie. Only its SHA-256 is stored. Sessions last 30 days and renew once less than 15 days remain. Failed logins are recorded with the client IP. 5 failures for one email from one IP within 15 minutes lock that email _for that IP_ for 15 minutes, so someone else can't lock you out from your own connection. 20 failures from one IP across any emails block that IP for 15 minutes. Attempts older than 24 hours are deleted. Unknown emails get the same response, timing and lockout as real ones.

@@ -51,9 +51,17 @@ export const loginAttempts = pgTable(
 	{
 		id: uuid('id').primaryKey().defaultRandom(),
 		email: text('email').notNull(),
+		// Client IP of the failed attempt. Null only on rows recorded before per-IP lockout.
+		ip: text('ip'),
 		attemptedAt: timestamp('attempted_at', { withTimezone: true }).notNull().defaultNow()
 	},
-	(t) => [index('login_attempts_email_idx').on(t.email, t.attemptedAt)]
+	(t) => [
+		// Superseded by login_attempts_email_ip_idx; kept so the migration stays additive.
+		index('login_attempts_email_idx').on(t.email, t.attemptedAt),
+		index('login_attempts_email_ip_idx').on(t.email, t.ip, t.attemptedAt),
+		index('login_attempts_ip_idx').on(t.ip, t.attemptedAt),
+		index('login_attempts_attempted_at_idx').on(t.attemptedAt)
+	]
 );
 
 export const lists = pgTable(

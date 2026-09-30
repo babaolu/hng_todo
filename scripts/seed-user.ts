@@ -4,10 +4,9 @@
  */
 import { eq } from 'drizzle-orm';
 import { normalizeEmail } from '../src/lib/server/auth';
-import { createNeonDb } from '../src/lib/server/db/neon';
 import { sessions, users } from '../src/lib/server/db/schema';
-import type { Db } from '../src/lib/server/db/types';
-import { hashPassword } from '../src/lib/server/password';
+import { hashPassword, MIN_PASSWORD_LENGTH } from '../src/lib/server/password';
+import { openDatabase } from './db';
 import { describeDatabase, loadEnv } from './env';
 
 const envFile = loadEnv();
@@ -17,19 +16,12 @@ if (!DATABASE_URL || !ADMIN_EMAIL || !ADMIN_PASSWORD) {
 	console.error('DATABASE_URL, ADMIN_EMAIL and ADMIN_PASSWORD must all be set.');
 	process.exit(1);
 }
-if (ADMIN_PASSWORD.length < 12) {
-	console.error('ADMIN_PASSWORD must be at least 12 characters.');
+if (ADMIN_PASSWORD.length < MIN_PASSWORD_LENGTH) {
+	console.error(`ADMIN_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters.`);
 	process.exit(1);
 }
 
-let db: Db;
-let close = async () => {};
-if (DATABASE_URL.startsWith('pglite:')) {
-	const { createPgliteDb } = await import('../src/lib/server/db/pglite');
-	({ db, close } = await createPgliteDb(DATABASE_URL.slice('pglite:'.length)));
-} else {
-	db = createNeonDb(DATABASE_URL);
-}
+const { db, close } = await openDatabase(DATABASE_URL);
 
 const email = normalizeEmail(ADMIN_EMAIL);
 const passwordHash = await hashPassword(ADMIN_PASSWORD);

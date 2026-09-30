@@ -1,5 +1,7 @@
 import { hash, verify } from '@node-rs/argon2';
 
+export const MIN_PASSWORD_LENGTH = 12;
+
 // OWASP-recommended argon2id parameters (the library's defaults).
 export function hashPassword(password: string): Promise<string> {
 	return hash(password);
