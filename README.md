@@ -2,10 +2,11 @@
 
 A small, single-account todo app: SvelteKit (Svelte 5) on Vercel, Postgres on Neon via Drizzle.
 
-- Inbox, lists and a Logbook of completed tasks
-- Quick-add from any view (`n` or `/` to focus, Enter to add)
-- Drag and drop reordering (tasks and lists), or `Alt`+`↑`/`↓` on a focused row
-- Detail panel for title, notes and list; soft delete with Undo
+- Today (`/`: due or overdue, plus anything pinned), Upcoming (next 14 days by day, then Later), Inbox (`/inbox`), lists and a Logbook
+- Quick-add from any view (`n` or `/` to focus, Enter to add) that understands dates and lists: `pay rent friday #home`, `dentist 12 sep`, `review next mon`, `water plants in 3 days`. Chips preview what was understood; ✕ or Esc keeps the text as typed. Adding in Today defaults the date to today.
+- Due dates are calendar days, and "today" is the user's own day: the browser reports its time zone, and the server stores it
+- Drag and drop reordering in Inbox and lists (tasks and lists), or `Alt`+`↑`/`↓` on a focused row; `t` pins the focused task to Today
+- Detail panel for title, notes, due date, pin and list; soft delete with Undo
 - Works without JavaScript (form actions + progressive enhancement), light and dark themes, usable at 360px
 
 ## Local setup
@@ -122,5 +123,7 @@ Both print only the email and the database host.
 - `src/lib/server/{tasks,lists,auth}.ts`: the only code that touches tables. Each store is created from a `Db` (neon-http in the app, PGlite in tests), and every function takes `userId` first and scopes every query by it. `src/lib/server/authorization.test.ts` checks that user A can't read or change user B's rows through any of them.
 - `src/lib/server/data.ts`: binds the stores to Neon for the app. Routes and form actions use this.
 - `src/lib/server/actions.ts`: form actions shared by every view.
+- `src/lib/dates.ts`: calendar-day arithmetic on `'YYYY-MM-DD'` strings, and `todayIn(timeZone)`. Shared by server and client, so labels and the quick-add preview use the same rules as the server.
+- `src/lib/quick-add.ts`: the quick-add parser (chrono-node plus guards). The client uses it for the preview; the server re-parses the raw text itself.
 - **Ordering** uses fractional indexing: a move rewrites only the moved row's `order` key, since neon-http has no interactive transactions. The `order` columns are `text COLLATE "C"`, so Postgres sorts keys byte-wise, the same way the key generator compares them.
 - **Auth:** argon2id password hash, random session token in an httpOnly cookie. Only its SHA-256 is stored. Sessions last 30 days and renew once less than 15 days remain. Failed logins are recorded with the client IP. 5 failures for one email from one IP within 15 minutes lock that email _for that IP_ for 15 minutes, so someone else can't lock you out from your own connection. 20 failures from one IP across any emails block that IP for 15 minutes. Attempts older than 24 hours are deleted. Unknown emails get the same response, timing and lockout as real ones.

@@ -1,4 +1,6 @@
 import { error, fail, redirect, type RequestEvent } from '@sveltejs/kit';
+import { isDateString, todayIn } from '$lib/dates';
+import { parseQuickAdd } from '$lib/quick-add';
 import { data } from './data';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -44,20 +46,40 @@ function found<T>(row: T | null | undefined): T {
 type Event = RequestEvent;
 
 async function setup({ locals, request }: Event) {
-	return { userId: requireUser(locals), form: await request.formData() };
+	const userId = requireUser(locals);
+	return { userId, timeZone: locals.user!.timeZone, form: await request.formData() };
 }
 
-/** Form actions shared by every task view (Inbox, lists, Logbook). */
+/** Form actions shared by every task view (Today, Upcoming, Inbox, lists, Logbook). */
 export const taskActions = {
+	/**
+	 * Quick-add. The raw text is parsed here (dates, #list); fields parsed by the
+	 * client for its preview are never trusted. parse=false keeps the text literal.
+	 */
 	async addTask(event: Event) {
-		const { userId, form } = await setup(event);
-		const title = text(form, 'title').trim();
-		if (!title) return fail(400, { addError: 'Title is required' });
-		if (title.length > MAX_TITLE) return fail(400, { addError: 'Title is too long' });
-		const task = found(
-			await data.tasks.create(userId, { title, listId: optionalId(form, 'listId') })
-		);
-		return { added: task.id };
+		const { userId, timeZone, form } = await setup(event);
+		const raw = text(form, 'title').trim();
+		if (!raw) return fail(400, { addError: 'Title is required' });
+		if (raw.length > MAX_TITLE) return fail(400, { addError: 'Title is too long' });
+
+		const today = todayIn(timeZone);
+		let title = raw;
+		let listId = optionalId(form, 'listId');
+		// Only the Today view adds a default date; Upcoming, Inbox and lists add none.
+		let dueDate = text(form, 'view') === 'today' ? today : null;
+
+		if (text(form, 'parse') !== 'false') {
+			const lists = raw.includes('#') ? await data.lists.all(userId) : [];
+			const parsed = parseQuickAdd(raw, { today, lists });
+			title = parsed.title;
+			listId = parsed.listId ?? listId;
+			dueDate = parsed.dueDate ?? dueDate;
+		}
+
+		const task = found(await data.tasks.create(userId, { title, listId, dueDate }));
+		return {
+			added: { id: task.id, title: task.title, listId: task.listId, dueDate: task.dueDate }
+		};
 	},
 
 	async toggleTask(event: Event) {
@@ -65,7 +87,7 @@ export const taskActions = {
 		found(await data.tasks.setCompleted(userId, id(form), text(form, 'completed') === 'true'));
 	},
 
-	/** Save from the detail panel: title, notes and (optionally) list. */
+	/** Save from the detail panel: title, notes, due date, pin and (optionally) list. */
 	async saveTask(event: Event) {
 		const { userId, form } = await setup(event);
 		const taskId = id(form);
@@ -74,9 +96,25 @@ export const taskActions = {
 		if (!title) return fail(400, { saveError: 'Title is required' });
 		if (title.length > MAX_TITLE) return fail(400, { saveError: 'Title is too long' });
 		if (notes.length > MAX_NOTES) return fail(400, { saveError: 'Notes are too long' });
-		found(await data.tasks.update(userId, taskId, { title, notes: notes || null }));
+
+		const values: Parameters<typeof data.tasks.update>[2] = { title, notes: notes || null };
+		if (form.has('dueDate')) {
+			// The Clear button submits clearDue (the no-JS path); an empty date input also clears.
+			const due = form.has('clearDue') ? '' : text(form, 'dueDate');
+			if (due && !isDateString(due)) return fail(400, { saveError: 'Invalid due date' });
+			values.dueDate = due || null;
+		}
+		// Checkboxes send nothing when unticked, so the form marks that the field was present.
+		if (form.has('pinField')) values.pinnedToday = form.has('pinnedToday');
+
+		found(await data.tasks.update(userId, taskId, values));
 		if (form.has('listId'))
 			found(await data.tasks.move(userId, taskId, optionalId(form, 'listId')));
+	},
+
+	async pinTask(event: Event) {
+		const { userId, form } = await setup(event);
+		found(await data.tasks.setPinned(userId, id(form), text(form, 'pinned') === 'true'));
 	},
 
 	async reorderTask(event: Event) {

@@ -45,7 +45,7 @@ describe('sessions', () => {
 	it('resolves a valid token to its user', async () => {
 		const { token } = await auth().createSession(userId);
 		const session = await auth().validateSession(token);
-		expect(session?.user).toEqual({ id: userId, email: EMAIL });
+		expect(session?.user).toEqual({ id: userId, email: EMAIL, timeZone: 'UTC' });
 		expect(session?.renewed).toBe(false);
 	});
 
@@ -87,7 +87,7 @@ const ATTACKER = '198.51.100.66';
 describe('login', () => {
 	it('accepts the right password, case-insensitive email', async () => {
 		const result = await auth().login('  ME@Example.com ', PASSWORD, ME);
-		expect(result).toEqual({ ok: true, user: { id: userId, email: EMAIL } });
+		expect(result).toEqual({ ok: true, user: { id: userId, email: EMAIL, timeZone: 'UTC' } });
 	});
 
 	it('gives the same answer for a wrong password and an unknown email', async () => {

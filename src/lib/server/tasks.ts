@@ -1,4 +1,20 @@
-import { and, asc, count, desc, eq, gt, isNotNull, isNull, min, ne } from 'drizzle-orm';
+import {
+	and,
+	asc,
+	count,
+	desc,
+	eq,
+	getTableColumns,
+	gt,
+	isNotNull,
+	isNull,
+	lte,
+	min,
+	ne,
+	or,
+	sql
+} from 'drizzle-orm';
+import { isDateString } from '../dates';
 import { lists, tasks, type Task } from './db/schema';
 import type { Db } from './db/types';
 import { generateKeyBetween, keyBetween } from './ordering';
@@ -38,6 +54,24 @@ export function createTaskStore(db: Db) {
 		return row ?? null;
 	}
 
+	/** Today and Upcoming are ordered by date, then list (Inbox first), then manual order. */
+	function byDate(userId: string, where: ReturnType<typeof and>) {
+		return db
+			.select(getTableColumns(tasks))
+			.from(tasks)
+			.leftJoin(lists, eq(lists.id, tasks.listId))
+			.where(and(live(userId), isNull(tasks.completedAt), where))
+			.orderBy(
+				sql`${tasks.dueDate} asc nulls last`,
+				sql`${lists.order} asc nulls first`,
+				asc(tasks.order),
+				asc(tasks.id)
+			);
+	}
+
+	/** Due today or earlier, or pinned to Today. `today` is the user's local date. */
+	const inToday = (today: string) => or(lte(tasks.dueDate, today), eq(tasks.pinnedToday, true));
+
 	async function update(userId: string, id: string, values: Partial<Task>) {
 		const [row] = await db
 			.update(tasks)
@@ -67,6 +101,24 @@ export function createTaskStore(db: Db) {
 				.limit(limit);
 		},
 
+		/** Today: active tasks due on or before `today` (overdue included) or pinned, across all lists. */
+		listToday(userId: string, today: string) {
+			return byDate(userId, inToday(today));
+		},
+
+		/** Upcoming: active tasks due after `today`; the view groups them by day. */
+		listUpcoming(userId: string, today: string) {
+			return byDate(userId, gt(tasks.dueDate, today));
+		},
+
+		async todayCount(userId: string, today: string): Promise<number> {
+			const [row] = await db
+				.select({ n: count() })
+				.from(tasks)
+				.where(and(live(userId), isNull(tasks.completedAt), inToday(today)));
+			return row?.n ?? 0;
+		},
+
 		/** Active task counts keyed by list id ('inbox' for the Inbox). */
 		async activeCounts(userId: string): Promise<Record<string, number>> {
 			const rows = await db
@@ -80,22 +132,47 @@ export function createTaskStore(db: Db) {
 		get,
 
 		/** New tasks go to the top of their list. Returns null if the list isn't the user's. */
-		async create(userId: string, input: { title: string; listId: ListId }) {
+		async create(
+			userId: string,
+			input: { title: string; listId: ListId; dueDate?: string | null }
+		) {
 			if (!(await ownsList(userId, input.listId))) return null;
+			if (input.dueDate != null && !isDateString(input.dueDate)) return null;
 			const [row] = await db
 				.insert(tasks)
 				.values({
 					userId,
 					listId: input.listId,
 					title: input.title,
+					dueDate: input.dueDate ?? null,
 					order: await topKey(userId, input.listId)
 				})
 				.returning();
 			return row;
 		},
 
-		update(userId: string, id: string, values: { title?: string; notes?: string | null }) {
+		update(
+			userId: string,
+			id: string,
+			values: {
+				title?: string;
+				notes?: string | null;
+				dueDate?: string | null;
+				pinnedToday?: boolean;
+			}
+		) {
+			if (values.dueDate != null && !isDateString(values.dueDate)) return Promise.resolve(null);
 			return update(userId, id, values);
+		},
+
+		/** Set or clear (null) the due date: a 'YYYY-MM-DD' calendar day. */
+		setDueDate(userId: string, id: string, dueDate: string | null) {
+			if (dueDate !== null && !isDateString(dueDate)) return Promise.resolve(null);
+			return update(userId, id, { dueDate });
+		},
+
+		setPinned(userId: string, id: string, pinned: boolean) {
+			return update(userId, id, { pinnedToday: pinned });
 		},
 
 		setCompleted(userId: string, id: string, completed: boolean) {

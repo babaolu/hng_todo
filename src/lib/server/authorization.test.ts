@@ -4,7 +4,8 @@
  */
 import { asc, eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { lists, tasks } from './db/schema';
+import { createAuthStore } from './auth';
+import { lists, tasks, users } from './db/schema';
 import type { Db } from './db/types';
 import { createListStore } from './lists';
 import { createTaskStore } from './tasks';
@@ -17,6 +18,8 @@ let listStore: ReturnType<typeof createListStore>;
 
 let a: string;
 let b: string;
+const TODAY = '2026-10-01';
+const TOMORROW = '2026-10-02';
 const A = {} as { list: string; task: string; inboxTask: string };
 const B = {} as {
 	list: string;
@@ -31,7 +34,8 @@ const B = {} as {
 async function snapshotOf(userId: string) {
 	return {
 		lists: await db.select().from(lists).where(eq(lists.userId, userId)).orderBy(asc(lists.id)),
-		tasks: await db.select().from(tasks).where(eq(tasks.userId, userId)).orderBy(asc(tasks.id))
+		tasks: await db.select().from(tasks).where(eq(tasks.userId, userId)).orderBy(asc(tasks.id)),
+		user: await db.select().from(users).where(eq(users.id, userId))
 	};
 }
 let bBefore: Awaited<ReturnType<typeof snapshotOf>>;
@@ -56,6 +60,11 @@ beforeAll(async () => {
 	await taskStore.setCompleted(b, B.doneTask, true);
 	B.deletedTask = (await taskStore.create(b, { title: 'B deleted', listId: B.list }))!.id;
 	await taskStore.remove(b, B.deletedTask);
+	// B has something in Today (due today, and pinned) and in Upcoming.
+	await taskStore.setDueDate(b, B.task, TODAY);
+	await taskStore.setPinned(b, B.secondTask, true);
+	await taskStore.setDueDate(b, B.inboxTask, TOMORROW);
+	await taskStore.setDueDate(a, A.task, TODAY);
 
 	bBefore = await snapshotOf(b);
 });
@@ -133,6 +142,49 @@ describe('tasks, run as user A against user B', () => {
 
 	it('restore cannot undelete B tasks', async () => {
 		expect(await taskStore.restore(a, B.deletedTask)).toBeNull();
+	});
+
+	it('listToday never returns B tasks, due or pinned', async () => {
+		expect((await taskStore.listToday(a, TODAY)).map((t) => t.id)).toEqual([A.task]);
+	});
+
+	it('listUpcoming never returns B tasks', async () => {
+		expect(await taskStore.listUpcoming(a, TODAY)).toEqual([]);
+	});
+
+	it('todayCount only counts A tasks', async () => {
+		expect(await taskStore.todayCount(a, TODAY)).toBe(1);
+	});
+
+	it('setDueDate cannot set or clear due dates on B tasks', async () => {
+		for (const id of bTaskIds()) {
+			expect(await taskStore.setDueDate(a, id, '2030-01-01')).toBeNull();
+			expect(await taskStore.setDueDate(a, id, null)).toBeNull();
+		}
+	});
+
+	it('setPinned cannot pin or unpin B tasks', async () => {
+		for (const id of bTaskIds()) {
+			expect(await taskStore.setPinned(a, id, true)).toBeNull();
+			expect(await taskStore.setPinned(a, id, false)).toBeNull();
+		}
+	});
+
+	it('update cannot change due date or pin on B tasks', async () => {
+		for (const id of bTaskIds()) {
+			expect(await taskStore.update(a, id, { dueDate: null, pinnedToday: false })).toBeNull();
+		}
+	});
+
+	it('create with a due date still refuses B lists', async () => {
+		expect(
+			await taskStore.create(a, { title: 'sneaky', listId: B.list, dueDate: TODAY })
+		).toBeNull();
+	});
+
+	it("setTimeZone for A leaves B's zone alone", async () => {
+		await createAuthStore(db).setTimeZone(a, 'Africa/Lagos');
+		expect((await db.select().from(users).where(eq(users.id, a)))[0].timeZone).toBe('Africa/Lagos');
 	});
 });
 

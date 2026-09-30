@@ -17,7 +17,7 @@ export const LOCKOUT_WINDOW = 15 * 60 * 1000;
 /** Failed attempts older than this are deleted. */
 const ATTEMPT_RETENTION = DAY;
 
-export type SessionUser = { id: string; email: string };
+export type SessionUser = { id: string; email: string; timeZone: string };
 export type LoginResult =
 	{ ok: true; user: SessionUser } | { ok: false; reason: 'invalid' | 'locked' };
 
@@ -85,7 +85,7 @@ export function createAuthStore(db: Db, clock: () => Date = () => new Date()) {
 			}
 
 			await db.delete(loginAttempts).where(pair(email, ip));
-			return { ok: true, user: { id: user.id, email: user.email } };
+			return { ok: true, user: { id: user.id, email: user.email, timeZone: user.timeZone } };
 		},
 
 		/** Returns the raw token for the cookie; only its SHA-256 hash is stored. */
@@ -105,7 +105,8 @@ export function createAuthStore(db: Db, clock: () => Date = () => new Date()) {
 					id: sessions.id,
 					expiresAt: sessions.expiresAt,
 					userId: users.id,
-					email: users.email
+					email: users.email,
+					timeZone: users.timeZone
 				})
 				.from(sessions)
 				.innerJoin(users, eq(users.id, sessions.userId))
@@ -124,7 +125,16 @@ export function createAuthStore(db: Db, clock: () => Date = () => new Date()) {
 				expiresAt = new Date(now + SESSION_TTL);
 				await db.update(sessions).set({ expiresAt }).where(eq(sessions.id, row.id));
 			}
-			return { user: { id: row.userId, email: row.email }, expiresAt, renewed };
+			return {
+				user: { id: row.userId, email: row.email, timeZone: row.timeZone },
+				expiresAt,
+				renewed
+			};
+		},
+
+		/** Record the user's IANA zone (validated by the caller). */
+		async setTimeZone(userId: string, timeZone: string): Promise<void> {
+			await db.update(users).set({ timeZone }).where(eq(users.id, userId));
 		},
 
 		async invalidateSession(token: string): Promise<void> {

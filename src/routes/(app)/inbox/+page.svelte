@@ -4,17 +4,16 @@
 	let { data } = $props();
 </script>
 
-<svelte:head><title>Today · Todo</title></svelte:head>
+<svelte:head><title>Inbox · Todo</title></svelte:head>
 
 <TaskView
 	tasks={data.tasks}
 	lists={data.lists}
 	listId={null}
 	selected={data.selected}
-	mode="today"
-	empty="Nothing due today."
+	empty="Inbox zero."
 >
 	{#snippet header()}
-		<h1 class="text-2xl font-semibold tracking-tight">Today</h1>
+		<h1 class="text-2xl font-semibold tracking-tight">Inbox</h1>
 	{/snippet}
 </TaskView>

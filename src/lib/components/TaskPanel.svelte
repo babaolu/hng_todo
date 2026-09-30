@@ -35,7 +35,9 @@
 				...task,
 				title,
 				notes: String(formData.get('notes') ?? '').trim() || null,
-				listId: listId === 'inbox' ? null : listId
+				listId: listId === 'inbox' ? null : listId,
+				dueDate: String(formData.get('dueDate') ?? '') || null,
+				pinnedToday: formData.has('pinnedToday')
 			});
 		}
 		return async ({ result, update }) => {
@@ -43,6 +45,14 @@
 			if (result.type !== 'success') toasts.show(failureMessage(result));
 		};
 	};
+
+	let dueInput = $state<HTMLInputElement>();
+
+	/** With JS, Clear just empties the field; without JS it submits clearDue. */
+	function clearDue(event: MouseEvent) {
+		event.preventDefault();
+		if (dueInput) dueInput.value = '';
+	}
 
 	function close(event: MouseEvent) {
 		event.preventDefault();
@@ -76,6 +86,8 @@
 
 	{#key task.id}
 		<form method="POST" action="?/saveTask" use:enhance={submit} class="mt-3 space-y-4">
+			<!-- Enter submits with the form's first button: make that Save, not Clear. -->
+			<button class="hidden" tabindex="-1" aria-hidden="true">Save</button>
 			<input type="hidden" name="id" value={task.id} />
 			<div>
 				<label for="task-title" class="sr-only">Title</label>
@@ -99,6 +111,38 @@
 					class="w-full text-sm"
 					placeholder="Add notes…">{task.notes ?? ''}</textarea
 				>
+			</div>
+			<div class="flex flex-wrap items-end gap-x-4 gap-y-3">
+				<div>
+					<label for="task-due" class="mb-1 block text-xs font-medium text-muted">Due</label>
+					<div class="flex items-center gap-1">
+						<input
+							bind:this={dueInput}
+							id="task-due"
+							name="dueDate"
+							type="date"
+							value={task.dueDate ?? ''}
+							class="text-sm"
+						/>
+						<button
+							class="btn-ghost px-2"
+							name="clearDue"
+							value="1"
+							formnovalidate
+							onclick={clearDue}>Clear</button
+						>
+					</div>
+				</div>
+				<label class="flex items-center gap-2 pb-2 text-sm">
+					<input type="hidden" name="pinField" value="1" />
+					<input
+						type="checkbox"
+						name="pinnedToday"
+						checked={task.pinnedToday}
+						class="rounded border-line text-accent focus:ring-accent"
+					/>
+					Pin to Today
+				</label>
 			</div>
 			<div>
 				<label for="task-list" class="mb-1 block text-xs font-medium text-muted">List</label>

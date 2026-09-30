@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
 	boolean,
 	customType,
+	date,
 	index,
 	pgTable,
 	text,
@@ -26,6 +27,8 @@ export const users = pgTable('users', {
 	id: uuid('id').primaryKey().defaultRandom(),
 	email: text('email').notNull().unique(),
 	passwordHash: text('password_hash').notNull(),
+	/** IANA zone used to work out "today" for this user; kept in sync from the browser. */
+	timeZone: text('time_zone').notNull().default('UTC'),
 	createdAt: timestamps.createdAt
 });
 
@@ -56,8 +59,6 @@ export const loginAttempts = pgTable(
 		attemptedAt: timestamp('attempted_at', { withTimezone: true }).notNull().defaultNow()
 	},
 	(t) => [
-		// Superseded by login_attempts_email_ip_idx; kept so the migration stays additive.
-		index('login_attempts_email_idx').on(t.email, t.attemptedAt),
 		index('login_attempts_email_ip_idx').on(t.email, t.ip, t.attemptedAt),
 		index('login_attempts_ip_idx').on(t.ip, t.attemptedAt),
 		index('login_attempts_attempted_at_idx').on(t.attemptedAt)
@@ -96,6 +97,9 @@ export const tasks = pgTable(
 		title: text('title').notNull(),
 		notes: text('notes'),
 		completedAt: timestamp('completed_at', { withTimezone: true }),
+		// A calendar day ('YYYY-MM-DD'), not an instant: string mode so no JS Date shifts it.
+		dueDate: date('due_date', { mode: 'string' }),
+		pinnedToday: boolean('pinned_today').notNull().default(false),
 		order: orderKey('order').notNull(),
 		...timestamps,
 		deletedAt: timestamp('deleted_at', { withTimezone: true })
@@ -106,7 +110,11 @@ export const tasks = pgTable(
 			.where(sql`${t.deletedAt} is null`),
 		index('tasks_user_completed_idx')
 			.on(t.userId, t.completedAt)
-			.where(sql`${t.deletedAt} is null and ${t.completedAt} is not null`)
+			.where(sql`${t.deletedAt} is null and ${t.completedAt} is not null`),
+		// Today and Upcoming: active tasks by due date.
+		index('tasks_user_due_idx')
+			.on(t.userId, t.dueDate)
+			.where(sql`${t.deletedAt} is null and ${t.completedAt} is null`)
 	]
 );
 

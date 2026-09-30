@@ -6,7 +6,7 @@ import type { Actions, PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ locals, url }) => {
 	const userId = requireUser(locals);
 	const [tasks, selected] = await Promise.all([
-		data.tasks.listToday(userId, todayIn(locals.user!.timeZone)),
+		data.tasks.listUpcoming(userId, todayIn(locals.user!.timeZone)),
 		selectedTask(userId, url)
 	]);
 	return { tasks, selected };

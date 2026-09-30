@@ -53,15 +53,22 @@
 	<ul class="space-y-px">
 		<li>
 			<a href="/" class={link('/')}>
-				<span class="w-4 text-center text-muted" aria-hidden="true">▢</span>
-				<span class="flex-1">Inbox</span>
-				{#if counts.inbox}<span class="text-xs text-muted">{counts.inbox}</span>{/if}
+				<span class="w-4 text-center text-accent" aria-hidden="true">★</span>
+				<span class="flex-1">Today</span>
+				{#if counts.today}<span class="text-xs text-muted">{counts.today}</span>{/if}
 			</a>
 		</li>
 		<li>
-			<a href="/logbook" class={link('/logbook')}>
-				<span class="w-4 text-center text-muted" aria-hidden="true">✓</span>
-				<span class="flex-1">Logbook</span>
+			<a href="/upcoming" class={link('/upcoming')}>
+				<span class="w-4 text-center text-muted" aria-hidden="true">▦</span>
+				<span class="flex-1">Upcoming</span>
+			</a>
+		</li>
+		<li>
+			<a href="/inbox" class={link('/inbox')}>
+				<span class="w-4 text-center text-muted" aria-hidden="true">▢</span>
+				<span class="flex-1">Inbox</span>
+				{#if counts.inbox}<span class="text-xs text-muted">{counts.inbox}</span>{/if}
 			</a>
 		</li>
 	</ul>
@@ -126,6 +133,15 @@
 				</p>{/if}
 		</form>
 	</section>
+
+	<ul class="space-y-px">
+		<li>
+			<a href="/logbook" class={link('/logbook')}>
+				<span class="w-4 text-center text-muted" aria-hidden="true">✓</span>
+				<span class="flex-1">Logbook</span>
+			</a>
+		</li>
+	</ul>
 
 	{#if archived.length}
 		<details class="group">

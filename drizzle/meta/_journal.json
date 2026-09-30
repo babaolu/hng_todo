@@ -15,6 +15,13 @@
       "when": 1790749166455,
       "tag": "0001_login_attempts_ip",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790755882121,
+      "tag": "0002_due_dates",
+      "breakpoints": true
     }
   ]
 }

@@ -68,9 +68,14 @@
 	[type='text'],
 	[type='email'],
 	[type='password'],
+	[type='date'],
 	textarea,
 	select {
 		@apply rounded-md border-line bg-surface text-ink placeholder:text-muted focus:border-accent focus:ring-accent;
+	}
+	/* Only unchecked: the plugin fills checked boxes with the text colour (text-accent). */
+	[type='checkbox']:not(:checked) {
+		@apply border-line bg-surface;
 	}
 }
 
