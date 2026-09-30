@@ -8,7 +8,7 @@
 	import { failureMessage, isTemp, neighbours, postAction } from '$lib/actions';
 	import { onShortcut } from '$lib/keyboard';
 	import { dayOf, daysBetween, dueLabel, formatDay } from '$lib/dates';
-	import { highlight } from '$lib/highlight';
+	import { excerpt, highlight, type Segment } from '$lib/highlight';
 	import { describe } from '$lib/repeat';
 	import { toasts } from '$lib/toasts.svelte';
 	import type { List, Task } from '$lib/types';
@@ -25,7 +25,7 @@
 		selected: Task | null;
 		/** active = Inbox or a list (manual order); today / upcoming are ordered by date. */
 		mode?: Mode;
-		/** Search: words to highlight in titles. */
+		/** Search: words to highlight in titles, and in a notes excerpt when the notes match. */
 		highlightWords?: string[];
 		/** Show the quick-add box (not on the search page). */
 		quickAdd?: boolean;
@@ -313,10 +313,20 @@
 		} ${openId === task.id ? 'bg-raised' : ''}`;
 </script>
 
+<!-- Search matches as escaped text segments: never {@html}. -->
+{#snippet marked(segments: Segment[])}
+	{#each segments as segment, i (i)}
+		{#if segment.match}<mark class="rounded-sm bg-accent-soft px-0.5 text-inherit"
+				>{segment.text}</mark
+			>{:else}{segment.text}{/if}
+	{/each}
+{/snippet}
+
 {#snippet row(task: Task)}
 	{@const done = !!task.completedAt}
 	{@const temp = isTemp(task.id)}
 	{@const due = task.dueDate ? dueLabel(task.dueDate, today) : null}
+	{@const notesMatch = excerpt(task.notes, highlightWords)}
 	<form
 		method="POST"
 		action="?/toggleTask"
@@ -366,12 +376,13 @@
 	>
 		<span class="flex min-w-0 flex-1 flex-col">
 			<span class="truncate {done ? 'text-muted line-through' : ''}">
-				{#each highlight(task.title, highlightWords) as segment, i (i)}
-					{#if segment.match}<mark class="rounded-sm bg-accent-soft px-0.5 text-inherit"
-							>{segment.text}</mark
-						>{:else}{segment.text}{/if}
-				{/each}
+				{@render marked(highlight(task.title, highlightWords))}
 			</span>
+			{#if notesMatch}
+				<span class="truncate text-xs text-muted" data-notes-excerpt>
+					{@render marked(notesMatch)}
+				</span>
+			{/if}
 			{#if task.repeatRule}
 				<!-- Phones: the repeat on its own line, so it's visible without a tooltip. -->
 				<span class="truncate text-xs text-muted sm:hidden">↻ {describe(task.repeatRule)}</span>
