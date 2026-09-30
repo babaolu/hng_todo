@@ -10,6 +10,7 @@
 	import { failureMessage } from '$lib/actions';
 	import { dueLabel, formatDay } from '$lib/dates';
 	import { parseQuickAdd, type DateOrder, type QuickAddList } from '$lib/quick-add';
+	import { quickAddEscape } from '$lib/keyboard';
 	import { toasts } from '$lib/toasts.svelte';
 
 	type Props = {
@@ -94,12 +95,12 @@
 	}
 
 	function onkeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape' && showChips) {
-			// Keep the text literal; don't let Escape also close a panel or drawer.
-			event.preventDefault();
-			event.stopPropagation();
-			literal();
-		}
+		if (event.key !== 'Escape') return;
+		// Don't let Escape also close a panel or drawer.
+		event.preventDefault();
+		event.stopPropagation();
+		if (quickAddEscape(showChips) === 'literal') literal();
+		else (event.currentTarget as HTMLInputElement).blur(); // the text stays
 	}
 </script>
 

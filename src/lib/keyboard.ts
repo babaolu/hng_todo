@@ -19,6 +19,20 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 	return el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
 }
 
+/**
+ * Esc inside the two boxes that handle it themselves (other fields keep their own Esc,
+ * e.g. the task panel's fields close the panel). Search: clear the query, then leave
+ * the box. Quick-add: with chips showing, keep the text as typed; otherwise leave the
+ * box and keep the text.
+ */
+export function searchEscape(query: string): 'clear' | 'leave' {
+	return query ? 'clear' : 'leave';
+}
+
+export function quickAddEscape(chipsShowing: boolean): 'literal' | 'leave' {
+	return chipsShowing ? 'literal' : 'leave';
+}
+
 const MODIFIERS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'OS']);
 
 /**

@@ -63,7 +63,7 @@ export const SHORTCUT_ROWS: ShortcutRow[] = [
 	{ keys: ['g i'], label: 'Go to Inbox', bindings: { 'g i': 'goInbox' } },
 	{
 		keys: ['Esc'],
-		label: 'Close the panel or dialog, or clear focus',
+		label: 'Close the panel or dialog, or leave search or quick-add',
 		bindings: { Escape: 'escape' }
 	},
 	{ keys: ['?'], label: 'Show these shortcuts', bindings: { '?': 'help' } }
@@ -76,4 +76,4 @@ export const SHORTCUT_BINDINGS: Record<string, ShortcutAction> = Object.assign(
 );
 
 export const SHORTCUTS_NOTE =
-	"Shortcuts are off while you're typing in a field. Ctrl and ⌘ combinations are left to the browser.";
+	"Shortcuts are off while you're typing in a field, except Esc (in search it clears the text first). Ctrl and ⌘ combinations are left to the browser.";

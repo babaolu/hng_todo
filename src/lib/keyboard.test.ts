@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createDispatcher, isTypingTarget, SHORTCUTS } from './keyboard';
+import {
+	createDispatcher,
+	isTypingTarget,
+	quickAddEscape,
+	searchEscape,
+	SHORTCUTS
+} from './keyboard';
 
 const press = (
 	key: string,
@@ -112,5 +118,24 @@ describe('isTypingTarget', () => {
 			isTypingTarget({ tagName: 'LI', isContentEditable: false } as unknown as EventTarget)
 		).toBe(false);
 		expect(isTypingTarget(null)).toBe(false);
+	});
+});
+
+describe('Esc in fields', () => {
+	it('is left to the field: the dispatcher only turns Esc into an action outside fields', () => {
+		const { d } = setup();
+		expect(d.handle(press('Escape', { target: 'input' }))).toBeNull();
+		expect(d.handle(press('Escape'))).toBe('escape');
+	});
+
+	it('search: clears a query first, then leaves the box', () => {
+		expect(searchEscape('rent')).toBe('clear');
+		expect(searchEscape('  ')).toBe('clear');
+		expect(searchEscape('')).toBe('leave');
+	});
+
+	it('quick-add: keeps the text literal while chips show, otherwise leaves the box', () => {
+		expect(quickAddEscape(true)).toBe('literal');
+		expect(quickAddEscape(false)).toBe('leave');
 	});
 });

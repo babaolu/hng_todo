@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { searchEscape } from '$lib/keyboard';
 
 	type Props = {
 		id: string;
@@ -24,6 +25,16 @@
 		const q = current;
 		if (untrack(() => document.activeElement !== input)) value = q;
 	});
+
+	function onkeydown(event: KeyboardEvent) {
+		if (event.key !== 'Escape') return;
+		event.preventDefault(); // the browser's own Esc would clear without updating results
+		event.stopPropagation();
+		if (searchEscape(value) === 'clear') {
+			value = '';
+			oninput();
+		} else input?.blur();
+	}
 
 	function oninput() {
 		if (live === 'desktop' && !matchMedia('(min-width: 768px)').matches) return;
@@ -53,6 +64,7 @@
 		maxlength="200"
 		bind:value
 		{oninput}
+		{onkeydown}
 		class="w-full py-1.5 text-sm"
 	/>
 </form>
