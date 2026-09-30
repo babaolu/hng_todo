@@ -410,7 +410,10 @@
 			{lists}
 			{today}
 			view={mode === 'today' ? 'today' : mode === 'upcoming' ? 'upcoming' : 'list'}
-			placeholder={mode === 'logbook' ? 'Add to Inbox' : 'Add a task'}
+			placeholder={mode === 'logbook' ? 'Add to Inbox…' : 'Add a task…'}
+			longPlaceholder={mode === 'logbook'
+				? 'Add to Inbox, e.g. pay rent fri'
+				: 'Add a task, e.g. pay rent fri #home'}
 			onadd={addOptimistic}
 			onadded={added}
 		/>

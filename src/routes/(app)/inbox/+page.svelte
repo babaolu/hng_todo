@@ -11,7 +11,7 @@
 	lists={data.lists}
 	listId={null}
 	selected={data.selected}
-	empty="Inbox zero."
+	empty="Tasks without a list land here."
 >
 	{#snippet header()}
 		<h1 class="text-2xl font-semibold tracking-tight">Inbox</h1>

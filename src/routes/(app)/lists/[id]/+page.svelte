@@ -3,6 +3,8 @@
 	import TaskView from '$lib/components/TaskView.svelte';
 
 	let { data } = $props();
+	// How quick-add finds this list: "Side project" -> #side-project.
+	const listTag = $derived(data.list.name.trim().toLowerCase().replace(/\s+/g, '-'));
 	let menu = $state<HTMLDetailsElement>();
 </script>
 
@@ -13,7 +15,7 @@
 	lists={data.lists}
 	listId={data.list.id}
 	selected={data.selected}
-	empty="Nothing here yet."
+	empty="Nothing in this list yet. Add a task above, or end any task with #{listTag}."
 >
 	{#snippet header()}
 		<div class="flex items-start gap-2">

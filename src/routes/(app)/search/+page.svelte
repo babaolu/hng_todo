@@ -16,7 +16,9 @@
 	mode="search"
 	quickAdd={false}
 	highlightWords={data.words}
-	empty={tooShort ? 'Type at least 2 characters to search.' : `No tasks match “${data.q}”.`}
+	empty={tooShort
+		? 'Type at least 2 characters to search.'
+		: 'No matches. Search looks in titles and notes.'}
 >
 	{#snippet header()}
 		<h1 class="text-2xl font-semibold tracking-tight">Search</h1>

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { onShortcut, SHORTCUT_HELP } from '$lib/keyboard';
+	import { onShortcut } from '$lib/keyboard';
+	import ShortcutsTable from './ShortcutsTable.svelte';
+	import { SHORTCUTS_NOTE } from '$lib/shortcuts';
 
 	let dialog = $state<HTMLDialogElement>();
 	let returnFocus: HTMLElement | null = null;
@@ -36,22 +38,8 @@
 		<h2 id="shortcuts-title" class="font-semibold">Keyboard shortcuts</h2>
 		<button type="button" class="-mr-2 btn-ghost px-2" aria-label="Close" onclick={close}>✕</button>
 	</div>
-	<dl class="max-h-[70dvh] space-y-2 overflow-y-auto px-5 py-4 text-sm">
-		{#each SHORTCUT_HELP as item (item.label)}
-			<div class="flex items-center justify-between gap-4">
-				<dt class="text-muted">{item.label}</dt>
-				<dd class="flex shrink-0 gap-1">
-					{#each item.keys as key (key)}
-						<kbd class="rounded border border-line bg-raised px-1.5 py-0.5 text-xs text-ink"
-							>{key}</kbd
-						>
-					{/each}
-				</dd>
-			</div>
-		{/each}
-	</dl>
-	<p class="border-t border-line px-5 py-3 text-xs text-muted">
-		Shortcuts are off while you're typing in a field. Ctrl and ⌘ combinations are left to the
-		browser.
-	</p>
+	<div class="max-h-[70dvh] overflow-y-auto px-5 py-4">
+		<ShortcutsTable />
+	</div>
+	<p class="border-t border-line px-5 py-3 text-xs text-muted">{SHORTCUTS_NOTE}</p>
 </dialog>

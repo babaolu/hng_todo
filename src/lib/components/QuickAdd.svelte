@@ -19,7 +19,10 @@
 		today: string;
 		/** 'today' makes today the default due date; the server applies the same rule. */
 		view: 'today' | 'upcoming' | 'list';
+		/** Short enough for a phone; also what's shown without JS. */
 		placeholder: string;
+		/** An example-led placeholder for wider screens, e.g. "Add a task, e.g. pay rent fri #home". */
+		longPlaceholder?: string;
 		/** Show the new task immediately; the refresh after saving replaces it. */
 		onadd?: (task: {
 			title: string;
@@ -30,7 +33,10 @@
 		/** Called with the saved task, e.g. to say where it went. */
 		onadded?: (task: Added) => void;
 	};
-	let { listId, lists, today, view, placeholder, onadd, onadded }: Props = $props();
+	let { listId, lists, today, view, placeholder, longPlaceholder, onadd, onadded }: Props =
+		$props();
+	let wide = $state(false);
+	const shownPlaceholder = $derived(wide && longPlaceholder ? longPlaceholder : placeholder);
 
 	let value = $state('');
 	/** Off once the user dismisses a chip: the text is then kept exactly as typed. */
@@ -45,6 +51,10 @@
 	let picker = $state<HTMLInputElement>();
 
 	onMount(() => {
+		// The example placeholder is cut off on narrow screens, so only use it where it fits.
+		const query = matchMedia('(min-width: 480px)');
+		wide = query.matches;
+		query.addEventListener('change', (e) => (wide = e.matches));
 		dateOrder = navigator.language.toLowerCase() === 'en-us' ? 'mdy' : 'dmy';
 	});
 
@@ -131,18 +141,27 @@
 			maxlength="500"
 			enterkeyhint="done"
 			aria-describedby="quick-add-chips"
-			{placeholder}
+			placeholder={shownPlaceholder}
 			bind:value
 			{onkeydown}
-			class="w-full rounded-lg py-2.5 pr-16 pl-10 shadow-xs"
+			class="w-full rounded-lg py-2.5 pr-11 pl-10 shadow-xs sm:pr-18"
 		/>
 		<span class="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-lg text-muted"
 			>+</span
 		>
-		<kbd
-			class="pointer-events-none absolute top-1/2 right-3 hidden -translate-y-1/2 rounded border border-line px-1.5 text-xs text-muted sm:block"
-			>N</kbd
-		>
+		<span class="absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1.5">
+			<kbd
+				class="pointer-events-none hidden rounded border border-line px-1.5 text-xs text-muted sm:block"
+				>N</kbd
+			>
+			<a
+				href="/help#quick-add"
+				aria-label="Quick-add help"
+				title="How quick-add works"
+				class="grid size-6 place-items-center rounded-full border border-line text-xs text-muted hover:border-accent hover:text-accent"
+				>?</a
+			>
+		</span>
 	</div>
 
 	<div

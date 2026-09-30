@@ -12,7 +12,7 @@
 	listId={null}
 	selected={data.selected}
 	mode="today"
-	empty="Nothing due today."
+	empty="Nothing due today. Pin a task or add one with a date, like ‘call mum fri’."
 >
 	{#snippet header()}
 		<h1 class="text-2xl font-semibold tracking-tight">Today</h1>

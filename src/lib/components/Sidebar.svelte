@@ -16,8 +16,11 @@
 		email: string;
 		/** Guests leave via a confirmation page, because leaving deletes their data. */
 		guest?: boolean;
+		/** Opens the keyboard shortcuts dialog (the button needs JS). */
+		onshortcuts?: () => void;
 	};
-	let { lists, counts, email, guest = false }: Props = $props();
+	let { lists, counts, email, guest = false, onshortcuts }: Props = $props();
+	let hydrated = $state(false);
 
 	let active = $derived(lists.filter((l) => !l.archived));
 	const archived = $derived(lists.filter((l) => l.archived));
@@ -53,6 +56,7 @@
 	}
 
 	onMount(() => {
+		hydrated = true;
 		const off = [
 			onShortcut('moveUp', () => moveFocusedList(-1)),
 			onShortcut('moveDown', () => moveFocusedList(1))
@@ -68,7 +72,32 @@
 </script>
 
 <nav class="flex h-full flex-col gap-6 overflow-y-auto p-3" aria-label="Main">
-	<div class="px-2 pt-1 text-sm font-semibold tracking-tight">Todo</div>
+	<div class="flex items-center justify-between px-2 pt-1">
+		<span class="text-sm font-semibold tracking-tight">Todo</span>
+		{#if hydrated && onshortcuts}
+			<!-- Keyboard users only: hidden on touch devices (no fine pointer / hover). -->
+			<button
+				type="button"
+				class="btn-ghost hidden px-1.5 py-1 [@media(hover:hover)_and_(pointer:fine)]:inline-flex"
+				aria-label="Keyboard shortcuts"
+				title="Keyboard shortcuts (?)"
+				onclick={onshortcuts}
+			>
+				<svg
+					viewBox="0 0 24 24"
+					class="size-5"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1.6"
+					stroke-linecap="round"
+					aria-hidden="true"
+				>
+					<rect x="2.5" y="6" width="19" height="12" rx="2" />
+					<path d="M6 10h.01M9 10h.01M12 10h.01M15 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" />
+				</svg>
+			</button>
+		{/if}
+	</div>
 
 	<SearchBox id="search" live="desktop" class="px-1" />
 
@@ -184,6 +213,12 @@
 	{/if}
 
 	<ul class="mt-auto space-y-px">
+		<li>
+			<a href="/help" class={link('/help')}>
+				<span class="w-4 text-center text-muted" aria-hidden="true">?</span>
+				<span class="flex-1">Help</span>
+			</a>
+		</li>
 		<li>
 			<a href="/settings" class={link('/settings')}>
 				<span class="w-4 text-center text-muted" aria-hidden="true">⚙</span>

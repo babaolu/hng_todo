@@ -12,7 +12,7 @@
 	listId={null}
 	selected={data.selected}
 	mode="upcoming"
-	empty="Nothing scheduled. Add a date to a task, or type one: “call mom friday”."
+	empty="Nothing in the next 14 days."
 >
 	{#snippet header()}
 		<h1 class="text-2xl font-semibold tracking-tight">Upcoming</h1>

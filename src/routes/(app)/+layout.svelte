@@ -44,9 +44,10 @@
 	// ---- Keyboard: the app's one keydown listener (see $lib/keyboard) ----
 	let shortcutsDialog = $state<ShortcutsDialog>();
 	const desktop = () => matchMedia('(min-width: 768px)').matches;
+	// Fields only: /help uses #quick-add as a section anchor.
 	const focusField = (id: string) => {
 		const el = document.getElementById(id);
-		if (!el) return false;
+		if (!(el instanceof HTMLInputElement)) return false;
 		el.focus();
 		return true;
 	};
@@ -118,7 +119,13 @@
 	<aside
 		class="fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] -translate-x-full border-r border-line bg-surface transition-transform peer-checked:translate-x-0 md:w-64 md:translate-x-0"
 	>
-		<Sidebar lists={data.lists} counts={data.counts} email={data.email} guest={!!data.guest} />
+		<Sidebar
+			lists={data.lists}
+			counts={data.counts}
+			email={data.email}
+			guest={!!data.guest}
+			onshortcuts={() => shortcutsDialog?.open()}
+		/>
 	</aside>
 
 	<div class="md:pl-64">

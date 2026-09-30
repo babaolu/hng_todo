@@ -71,47 +71,9 @@ export function createDispatcher<A extends string>(
 	};
 }
 
-/** The app's shortcuts. The shortcuts dialog lists them from SHORTCUT_HELP. */
-export const SHORTCUTS = {
-	j: 'next',
-	k: 'prev',
-	ArrowDown: 'rowDown',
-	ArrowUp: 'rowUp',
-	x: 'toggle',
-	' ': 'toggle',
-	e: 'open',
-	Enter: 'openRow',
-	t: 'pin',
-	Delete: 'delete',
-	Backspace: 'delete',
-	n: 'quickAdd',
-	'/': 'search',
-	Escape: 'escape',
-	'?': 'help',
-	'g t': 'goToday',
-	'g u': 'goUpcoming',
-	'g i': 'goInbox',
-	'Alt+ArrowUp': 'moveUp',
-	'Alt+ArrowDown': 'moveDown'
-} as const;
-
-export type ShortcutAction = (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
-
-export const SHORTCUT_HELP: { keys: string[]; label: string }[] = [
-	{ keys: ['j', 'k'], label: 'Next / previous task' },
-	{ keys: ['x', 'Space'], label: 'Complete or reopen the focused task' },
-	{ keys: ['e'], label: 'Open the focused task' },
-	{ keys: ['t'], label: 'Pin the focused task to Today' },
-	{ keys: ['Alt ↑', 'Alt ↓'], label: 'Move the focused task (or list) up / down' },
-	{ keys: ['Delete'], label: 'Delete the focused task' },
-	{ keys: ['n'], label: 'New task' },
-	{ keys: ['/'], label: 'Search' },
-	{ keys: ['g t'], label: 'Go to Today' },
-	{ keys: ['g u'], label: 'Go to Upcoming' },
-	{ keys: ['g i'], label: 'Go to Inbox' },
-	{ keys: ['Esc'], label: 'Close the panel or dialog, or clear focus' },
-	{ keys: ['?'], label: 'Show these shortcuts' }
-];
+/** The app's bindings and their descriptions live in ./shortcuts (one list for everything). */
+export { SHORTCUT_BINDINGS as SHORTCUTS, type ShortcutAction } from './shortcuts';
+import type { ShortcutAction } from './shortcuts';
 
 // ---------- handler registry ----------
 
