@@ -35,15 +35,17 @@ There is no sign-up. `pnpm seed:user` creates the one account, or resets its pas
 
 ## Scripts
 
-| Script             | What it does                                                                |
-| ------------------ | --------------------------------------------------------------------------- |
-| `pnpm dev`         | Dev server                                                                  |
-| `pnpm build`       | Production build (Vercel adapter)                                           |
-| `pnpm check`       | `svelte-check` / TypeScript                                                 |
-| `pnpm test`        | Vitest; each file runs against an in-memory PGlite                          |
-| `pnpm db:generate` | Generate a SQL migration from `src/lib/server/db/schema.ts` into `drizzle/` |
-| `pnpm db:migrate`  | Apply pending migrations in `drizzle/` to `DATABASE_URL`                    |
-| `pnpm seed:user`   | Create or update the single account                                         |
+| Script                 | What it does                                                                |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `pnpm dev`             | Dev server                                                                  |
+| `pnpm build`           | Production build (Vercel adapter)                                           |
+| `pnpm check`           | `svelte-check` / TypeScript                                                 |
+| `pnpm test`            | Vitest; each file runs against an in-memory PGlite                          |
+| `pnpm db:generate`     | Generate a SQL migration from `src/lib/server/db/schema.ts` into `drizzle/` |
+| `pnpm db:migrate`      | Apply pending migrations in `drizzle/` to `DATABASE_URL`                    |
+| `pnpm db:migrate:prod` | Same, against `.env.production.local` (Neon)                                |
+| `pnpm seed:user`       | Create or update the single account                                         |
+| `pnpm seed:user:prod`  | Same, against `.env.production.local` (Neon)                                |
 
 ## Migrations
 
@@ -64,26 +66,40 @@ DATABASE_URL='postgresql://…' pnpm db:migrate
 
 ## Deploy (Vercel + Neon, free tiers)
 
-Functions are pinned to Vercel's London region (`lhr1`, set in `vite.config.ts`), next to a Neon project in AWS `eu-west-2`.
+Production is a Vercel project imported from GitHub (`main` branch), with functions pinned to London (`lhr1`, set in `vite.config.ts`) next to a Neon project in AWS `eu-west-2`. The rules (also in `CLAUDE.md`):
 
-1. **Neon:** create a project in `aws-eu-west-2`. Put both connection strings in `.env.production.local` (git-ignored). Quote them, because the `&` in the query string breaks `source` in bash:
-   ```sh
-   DATABASE_URL='postgresql://…@ep-…-pooler.c-2.eu-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
-   DIRECT_DATABASE_URL='postgresql://…@ep-….c-2.eu-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
-   ```
-   The pooled URL is for the app. The direct URL is for migrations: drizzle-kit connects over TCP with node-postgres, and `drizzle.config.ts` prefers `DIRECT_DATABASE_URL` when it's set.
-2. **Migrate and seed** from your machine (real env vars take precedence over `.env`):
-   ```sh
-   set -a; . ./.env.production.local; set +a
-   pnpm db:migrate
-   ADMIN_EMAIL='you@example.com' ADMIN_PASSWORD='…' pnpm seed:user
-   ```
-3. **Vercel:** link the project (`vercel link`) and set these for Production. Nothing else, and never the admin credentials:
-   - `DATABASE_URL`: the pooled Neon URL
-   - `ENABLE_EXPERIMENTAL_COREPACK=1`: makes Vercel use the pnpm version pinned in `package.json`
-4. Deploy: `vercel --prod`, or push to the connected branch.
+- **Pushing to `main` deploys production** through Vercel's GitHub integration.
+- **Migrations never run on push.** If a change includes a migration, run `pnpm db:migrate:prod` _before_ pushing, and only for additive changes. Flag anything destructive (dropping or renaming columns) to the owner first.
+- **Never commit `.env*` files** (except `.env.example`). **Never add `ADMIN_*` variables to Vercel.** The app only needs `DATABASE_URL`.
 
-Only `DATABASE_URL` is needed at runtime. For future schema changes, run `pnpm db:migrate` against Neon before (or right after) deploying code that depends on them.
+### Production env file
+
+`.env.production.local` (git-ignored) holds the Neon connection strings. Quote the values, because the `&` in the query string breaks shell sourcing:
+
+```sh
+DATABASE_URL='postgresql://…@ep-…-pooler.c-2.eu-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+DIRECT_DATABASE_URL='postgresql://…@ep-….c-2.eu-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+```
+
+The pooled `DATABASE_URL` is for the app and the seed. The direct URL is for migrations: drizzle-kit connects over TCP with node-postgres, so it uses `DIRECT_DATABASE_URL` when set.
+
+### Targeting production
+
+| Local (`.env`)    | Production (`.env.production.local`) |
+| ----------------- | ------------------------------------ |
+| `pnpm db:migrate` | `pnpm db:migrate:prod`               |
+| `pnpm seed:user`  | `pnpm seed:user:prod`                |
+
+The `:prod` scripts set `ENV_FILE=.env.production.local`. That file must exist, it overrides anything already exported in your shell, and `.env` is never read. Both commands print the database host they used.
+
+To (re)create the account in production, add quoted `ADMIN_EMAIL` and `ADMIN_PASSWORD` to `.env.production.local`, run `pnpm seed:user:prod`, then delete the `ADMIN_PASSWORD` line.
+
+### Vercel project settings
+
+- Import `babaolu/hng_todo` from GitHub. The defaults are right: framework preset **SvelteKit**, root directory `./`, install and build commands left at their defaults (pnpm is detected from `pnpm-lock.yaml`).
+- Production environment variables:
+  - `DATABASE_URL`: the pooled Neon URL
+  - `ENABLE_EXPERIMENTAL_COREPACK` = `1`: makes Vercel use the pnpm version pinned in `package.json`
 
 ## How it fits together
 

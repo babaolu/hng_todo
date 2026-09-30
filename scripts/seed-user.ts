@@ -1,14 +1,16 @@
 /**
  * Create or update the single account from ADMIN_EMAIL / ADMIN_PASSWORD.
- * Usage: pnpm seed:user   (reads .env; real env vars take precedence)
+ * Usage: pnpm seed:user (reads .env) or pnpm seed:user:prod (reads .env.production.local)
  */
-import 'dotenv/config';
 import { eq } from 'drizzle-orm';
 import { normalizeEmail } from '../src/lib/server/auth';
 import { createNeonDb } from '../src/lib/server/db/neon';
 import { sessions, users } from '../src/lib/server/db/schema';
 import type { Db } from '../src/lib/server/db/types';
 import { hashPassword } from '../src/lib/server/password';
+import { describeDatabase, loadEnv } from './env';
+
+const envFile = loadEnv();
 
 const { DATABASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD } = process.env;
 if (!DATABASE_URL || !ADMIN_EMAIL || !ADMIN_PASSWORD) {
@@ -42,4 +44,4 @@ const [user] = await db
 await db.delete(sessions).where(eq(sessions.userId, user.id));
 await close();
 
-console.log(`Seeded ${email}.`);
+console.log(`Seeded ${email} in ${describeDatabase(DATABASE_URL)} (from ${envFile}).`);

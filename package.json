@@ -16,7 +16,9 @@
 		"format": "prettier --write .",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
-		"seed:user": "tsx scripts/seed-user.ts"
+		"db:migrate:prod": "ENV_FILE=.env.production.local drizzle-kit migrate",
+		"seed:user": "tsx scripts/seed-user.ts",
+		"seed:user:prod": "ENV_FILE=.env.production.local tsx scripts/seed-user.ts"
 	},
 	"devDependencies": {
 		"@electric-sql/pglite": "^0.5.8",
